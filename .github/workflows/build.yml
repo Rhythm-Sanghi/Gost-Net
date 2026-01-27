@@ -1,0 +1,187 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          git \
+          zip \
+          unzip \
+          openjdk-17-jdk \
+          autoconf \
+          libtool \
+          pkg-config \
+          zlib1g-dev \
+          libncurses5-dev \
+          libncursesw5-dev \
+          libtinfo5 \
+          cmake \
+          libffi-dev \
+          libssl-dev \
+          python3-pip
+          
+    - name: Set Java options (prevent OOM errors)
+      run: |
+        echo "_JAVA_OPTIONS=-Xms512m -Xmx2048m" >> $GITHUB_ENV
+        echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
+        
+    - name: Cache Buildozer directory
+      uses: actions/cache@v3
+      with:
+        path: |
+          .buildozer
+          ~/.buildozer
+        key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec', 'requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-buildozer-
+          
+    - name: Install Python dependencies
+      run: |
+        pip install --upgrade pip setuptools wheel
+        pip install --upgrade cython==0.29.36
+        pip install --upgrade buildozer
+        pip install -r requirements.txt
+        
+    - name: Generate app assets
+      run: |
+        python create_assets.py
+        
+    - name: Check for release secrets
+      id: check_secrets
+      run: |
+        if [ -n "${{ secrets.KEYSTORE_PASSWORD }}" ] && [ -n "${{ secrets.KEY_ALIAS }}" ] && [ -n "${{ secrets.KEY_PASSWORD }}" ]; then
+          echo "has_secrets=true" >> $GITHUB_OUTPUT
+        else
+          echo "has_secrets=false" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Decode and setup keystore (Release only)
+      if: steps.check_secrets.outputs.has_secrets == 'true'
+      run: |
+        echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > ghostnet.keystore
+        
+    - name: Build debug APK
+      if: steps.check_secrets.outputs.has_secrets == 'false'
+      run: |
+        buildozer -v android debug
+        
+    - name: Build release APK
+      if: steps.check_secrets.outputs.has_secrets == 'true'
+      env:
+        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      run: |
+        buildozer -v android release
+        
+    - name: Sign release APK
+      if: steps.check_secrets.outputs.has_secrets == 'true'
+      run: |
+        # Find the unsigned APK
+        APK_PATH=$(find bin -name "*.apk" -type f | head -n 1)
+        SIGNED_APK_PATH="${APK_PATH%-unsigned.apk}-signed.apk"
+        
+        # Sign with apksigner
+        $ANDROID_HOME/build-tools/*/apksigner sign \
+          --ks ghostnet.keystore \
+          --ks-pass pass:"${{ secrets.KEYSTORE_PASSWORD }}" \
+          --key-pass pass:"${{ secrets.KEY_PASSWORD }}" \
+          --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
+          --out "$SIGNED_APK_PATH" \
+          "$APK_PATH"
+          
+        # Verify signature
+        $ANDROID_HOME/build-tools/*/apksigner verify "$SIGNED_APK_PATH"
+        
+        echo "Signed APK: $SIGNED_APK_PATH"
+        
+    - name: Get APK filename
+      id: apk_name
+      run: |
+        if [ "${{ steps.check_secrets.outputs.has_secrets }}" == "true" ]; then
+          APK_PATH=$(find bin -name "*-signed.apk" -type f | head -n 1)
+        else
+          APK_PATH=$(find bin -name "*.apk" -type f | head -n 1)
+        fi
+        echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
+        echo "apk_name=$(basename $APK_PATH)" >> $GITHUB_OUTPUT
+        
+    - name: Upload APK artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ghostnet-apk-${{ github.run_number }}
+        path: ${{ steps.apk_name.outputs.apk_path }}
+        retention-days: 30
+        
+    - name: Generate build report
+      if: always()
+      run: |
+        echo "## 📱 Build Report" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Build Type:** ${{ steps.check_secrets.outputs.has_secrets == 'true' && 'Release (Signed)' || 'Debug' }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Run Number:** ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+        
+        if [ -f "${{ steps.apk_name.outputs.apk_path }}" ]; then
+          APK_SIZE=$(du -h "${{ steps.apk_name.outputs.apk_path }}" | cut -f1)
+          echo "**APK Size:** $APK_SIZE" >> $GITHUB_STEP_SUMMARY
+          echo "**APK Name:** ${{ steps.apk_name.outputs.apk_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Build successful!**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Download the APK from the **Artifacts** section below." >> $GITHUB_STEP_SUMMARY
+        else
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "❌ **Build failed!**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check the build logs for errors." >> $GITHUB_STEP_SUMMARY
+        fi
+        
+    - name: Comment on PR (if applicable)
+      if: github.event_name == 'pull_request' && steps.apk_name.outputs.apk_path != ''
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const apkName = '${{ steps.apk_name.outputs.apk_name }}';
+          const buildType = '${{ steps.check_secrets.outputs.has_secrets == 'true' && 'Release (Signed)' || 'Debug' }}';
+          const runNumber = '${{ github.run_number }}';
+          
+          const body = `## 📱 APK Build Complete
+          
+          **Build Type:** ${buildType}
+          **APK:** \`${apkName}\`
+          **Run:** [#${runNumber}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          
+          Download the APK from the **Artifacts** section of the workflow run.
+          
+          ---
+          
+          🤖 *Automated by GitHub Actions*`;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: body
+          });

@@ -1,0 +1,16 @@
+# Ghost Net - Requirements
+# Python dependencies for development and production
+
+# Core Framework
+kivy==2.3.0
+kivymd==1.1.1
+
+# Cryptography
+cryptography>=41.0.0
+
+# Image processing (required by Kivy)
+pillow>=10.0.0
+
+# Development/Testing (optional)
+# pytest>=7.4.0
+# pytest-asyncio>=0.21.0

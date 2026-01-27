@@ -1,0 +1,186 @@
+{
+  "_comment": "Ghost Net - 中文 (Chinese Simplified) Translations",
+  "_version": "1.0.0",
+  "_language": "zh",
+  "_language_name": "中文",
+  
+  "app_name": "Ghost Net",
+  "app_tagline": "网络就是你",
+  "app_description": "安全 • 离线 • 免费",
+  "version": "v{version}",
+  
+  "boot_screen": {
+    "title": "👻 Ghost Net",
+    "tagline": "安全 • 离线 • 免费",
+    "status_initializing": "正在初始化...",
+    "status_permissions": "正在请求权限...",
+    "status_config": "正在加载配置...",
+    "status_database": "正在初始化数据库...",
+    "status_network": "正在启动P2P网络...",
+    "status_cleanup": "正在清理旧消息...",
+    "status_ready": "准备就绪！",
+    "version_label": "v1.0.0"
+  },
+  
+  "radar_screen": {
+    "title": "👻 Ghost Net",
+    "status_scanning": "正在搜索节点...",
+    "status_no_peers": "未找到节点。正在等待...",
+    "status_found_peers": "找到 {count} 个节点",
+    "section_peers": "已发现的节点",
+    "btn_chat": "聊天",
+    "btn_settings": "设置"
+  },
+  
+  "chat_screen": {
+    "title_prefix": "💬 ",
+    "title_default": "选择一个节点",
+    "hint_message": "输入消息...",
+    "btn_send": "发送",
+    "btn_attach": "附加文件",
+    "btn_back": "返回"
+  },
+  
+  "settings_screen": {
+    "title": "⚙️ 设置",
+    "btn_back": "返回",
+    
+    "section_identity": "🪪 身份",
+    "identity_subtitle": "管理您的显示名称",
+    "label_username": "用户名",
+    "btn_update_username": "更新用户名",
+    "msg_username_empty": "用户名不能为空",
+    "msg_username_updated": "用户名已更新为 '{username}'",
+    
+    "section_privacy": "🔒 隐私",
+    "privacy_subtitle": "控制数据保留和清理",
+    "label_retention": "消息保留时间：{hours} 小时",
+    "hint_retention": "超过此时间的消息将被自动删除",
+    "msg_retention_updated": "保留时间已更新为 {hours} 小时",
+    
+    "section_appearance": "🎨 外观",
+    "appearance_subtitle": "自定义应用外观",
+    "label_dark_mode": "深色模式",
+    "msg_dark_mode_enabled": "深色模式已启用",
+    "msg_dark_mode_disabled": "深色模式已禁用",
+    
+    "section_language": "🌐 语言",
+    "language_subtitle": "选择您的首选语言",
+    "label_language": "语言",
+    "btn_change_language": "更改语言",
+    "msg_language_changed": "语言已更改为 {language}",
+    "msg_restart_required": "重启应用以应用语言更改",
+    
+    "section_about": "ℹ️ 关于",
+    "about_subtitle": "应用信息和致谢",
+    "btn_about": "查看应用信息",
+    
+    "section_danger": "⚠️ 危险区域",
+    "danger_subtitle": "不可逆操作",
+    "btn_panic": "🔥 紧急模式 - 删除所有数据",
+    "hint_panic": "这将永久删除所有消息、文件和密钥"
+  },
+  
+  "about_dialog": {
+    "title": "关于 Ghost Net",
+    "btn_close": "关闭",
+    "label_version": "版本",
+    "label_build": "构建",
+    "label_framework": "框架",
+    "label_license": "许可证",
+    "label_github": "GitHub",
+    "value_version": "1.0.0",
+    "value_build": "生产版",
+    "value_framework": "KivyMD + Python",
+    "value_license": "开源",
+    "value_github": "github.com/yourusername/ghostnet"
+  },
+  
+  "panic_dialog": {
+    "title_confirm": "⚠️ 激活紧急模式？",
+    "message_confirm": "这将删除所有数据：\n• 所有消息\n• 所有文件\n• 加密密钥\n• 应用配置\n\n应用将立即退出。",
+    "title_final": "⚠️ 最终警告",
+    "message_final": "此操作不可逆！\n\n所有消息、文件、加密密钥和配置将被永久删除。\n\n您确定要这样做吗？",
+    "btn_cancel": "取消",
+    "btn_continue": "继续",
+    "btn_delete": "删除所有内容",
+    "msg_deleting": "正在开始数据销毁...",
+    "msg_database_deleted": "数据库已删除",
+    "msg_keys_deleted": "加密密钥已删除",
+    "msg_downloads_deleted": "下载已删除",
+    "msg_config_deleted": "配置已删除",
+    "msg_complete": "所有数据已销毁。正在退出..."
+  },
+  
+  "language_dialog": {
+    "title": "选择语言",
+    "btn_cancel": "取消",
+    "btn_apply": "应用"
+  },
+  
+  "file_bubble": {
+    "btn_open": "打开",
+    "error_not_found": "文件未找到",
+    "error_opening": "打开文件时出错"
+  },
+  
+  "network": {
+    "status_starting": "正在启动网络引擎...",
+    "status_stopping": "正在停止网络引擎...",
+    "status_connected": "已连接到 {peer}",
+    "status_disconnected": "已断开与 {peer} 的连接",
+    "error_send_failed": "发送消息失败",
+    "error_file_send_failed": "发送文件失败",
+    "msg_file_received": "从 {username} 收到文件：{filename}",
+    "msg_message_received": "来自 {username} 的新消息"
+  },
+  
+  "permissions": {
+    "requesting": "正在请求权限...",
+    "granted": "权限已授予",
+    "denied": "权限被拒绝"
+  },
+  
+  "errors": {
+    "no_peer_selected": "未选择节点",
+    "network_error": "网络错误：{error}",
+    "database_error": "数据库错误：{error}",
+    "config_error": "配置错误：{error}",
+    "unknown_error": "发生未知错误"
+  },
+  
+  "common": {
+    "ok": "确定",
+    "cancel": "取消",
+    "yes": "是",
+    "no": "否",
+    "save": "保存",
+    "delete": "删除",
+    "close": "关闭",
+    "back": "返回",
+    "next": "下一步",
+    "done": "完成",
+    "error": "错误",
+    "warning": "警告",
+    "info": "信息",
+    "success": "成功"
+  },
+  
+  "time": {
+    "hours": "小时",
+    "minutes": "分钟",
+    "seconds": "秒",
+    "days": "天",
+    "now": "现在",
+    "today": "今天",
+    "yesterday": "昨天"
+  },
+  
+  "units": {
+    "bytes": "B",
+    "kilobytes": "KB",
+    "megabytes": "MB",
+    "gigabytes": "GB",
+    "terabytes": "TB"
+  }
+}

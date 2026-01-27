@@ -1,0 +1,186 @@
+{
+  "_comment": "Ghost Net - Español (Spanish) Translations",
+  "_version": "1.0.0",
+  "_language": "es",
+  "_language_name": "Español",
+  
+  "app_name": "Ghost Net",
+  "app_tagline": "La Red Eres Tú",
+  "app_description": "Seguro • Sin Conexión • Gratis",
+  "version": "v{version}",
+  
+  "boot_screen": {
+    "title": "👻 Ghost Net",
+    "tagline": "Seguro • Sin Conexión • Gratis",
+    "status_initializing": "Inicializando...",
+    "status_permissions": "Solicitando permisos...",
+    "status_config": "Cargando configuración...",
+    "status_database": "Inicializando base de datos...",
+    "status_network": "Iniciando red P2P...",
+    "status_cleanup": "Limpiando mensajes antiguos...",
+    "status_ready": "¡Listo!",
+    "version_label": "v1.0.0"
+  },
+  
+  "radar_screen": {
+    "title": "👻 Ghost Net",
+    "status_scanning": "Buscando pares...",
+    "status_no_peers": "No se encontraron pares. Esperando...",
+    "status_found_peers": "Se encontraron {count} par(es)",
+    "section_peers": "Pares Descubiertos",
+    "btn_chat": "Chat",
+    "btn_settings": "Ajustes"
+  },
+  
+  "chat_screen": {
+    "title_prefix": "💬 ",
+    "title_default": "Selecciona un par",
+    "hint_message": "Escribe un mensaje...",
+    "btn_send": "Enviar",
+    "btn_attach": "Adjuntar archivo",
+    "btn_back": "Atrás"
+  },
+  
+  "settings_screen": {
+    "title": "⚙️ Ajustes",
+    "btn_back": "Atrás",
+    
+    "section_identity": "🪪 Identidad",
+    "identity_subtitle": "Administra tu nombre de usuario",
+    "label_username": "Nombre de usuario",
+    "btn_update_username": "Actualizar Nombre",
+    "msg_username_empty": "El nombre no puede estar vacío",
+    "msg_username_updated": "Nombre actualizado a '{username}'",
+    
+    "section_privacy": "🔒 Privacidad",
+    "privacy_subtitle": "Controla la retención y limpieza de datos",
+    "label_retention": "Retención de Mensajes: {hours} horas",
+    "hint_retention": "Los mensajes más antiguos se eliminarán automáticamente",
+    "msg_retention_updated": "Horas de retención actualizadas a {hours}",
+    
+    "section_appearance": "🎨 Apariencia",
+    "appearance_subtitle": "Personaliza el aspecto de la aplicación",
+    "label_dark_mode": "Modo Oscuro",
+    "msg_dark_mode_enabled": "Modo oscuro activado",
+    "msg_dark_mode_disabled": "Modo oscuro desactivado",
+    
+    "section_language": "🌐 Idioma",
+    "language_subtitle": "Elige tu idioma preferido",
+    "label_language": "Idioma",
+    "btn_change_language": "Cambiar Idioma",
+    "msg_language_changed": "Idioma cambiado a {language}",
+    "msg_restart_required": "Reinicia la app para aplicar el cambio de idioma",
+    
+    "section_about": "ℹ️ Acerca de",
+    "about_subtitle": "Información de la aplicación y créditos",
+    "btn_about": "Ver Información",
+    
+    "section_danger": "⚠️ Zona de Peligro",
+    "danger_subtitle": "Acciones irreversibles",
+    "btn_panic": "🔥 MODO PÁNICO - Eliminar Todos los Datos",
+    "hint_panic": "Esto eliminará permanentemente todos los mensajes, archivos y claves"
+  },
+  
+  "about_dialog": {
+    "title": "Acerca de Ghost Net",
+    "btn_close": "Cerrar",
+    "label_version": "Versión",
+    "label_build": "Compilación",
+    "label_framework": "Framework",
+    "label_license": "Licencia",
+    "label_github": "GitHub",
+    "value_version": "1.0.0",
+    "value_build": "Producción",
+    "value_framework": "KivyMD + Python",
+    "value_license": "Código Abierto",
+    "value_github": "github.com/yourusername/ghostnet"
+  },
+  
+  "panic_dialog": {
+    "title_confirm": "⚠️ ¿Activar Modo Pánico?",
+    "message_confirm": "Esto eliminará TODOS los datos:\n• Todos los mensajes\n• Todos los archivos\n• Claves de cifrado\n• Configuración de la app\n\nLa aplicación se cerrará inmediatamente.",
+    "title_final": "⚠️ ADVERTENCIA FINAL",
+    "message_final": "¡Esta acción es IRREVERSIBLE!\n\nTodos los mensajes, archivos, claves de cifrado y configuración se eliminarán permanentemente.\n\n¿Estás ABSOLUTAMENTE seguro?",
+    "btn_cancel": "Cancelar",
+    "btn_continue": "Continuar",
+    "btn_delete": "ELIMINAR TODO",
+    "msg_deleting": "Iniciando destrucción de datos...",
+    "msg_database_deleted": "Base de datos eliminada",
+    "msg_keys_deleted": "Clave de cifrado eliminada",
+    "msg_downloads_deleted": "Descargas eliminadas",
+    "msg_config_deleted": "Configuración eliminada",
+    "msg_complete": "Todos los datos destruidos. Cerrando..."
+  },
+  
+  "language_dialog": {
+    "title": "Seleccionar Idioma",
+    "btn_cancel": "Cancelar",
+    "btn_apply": "Aplicar"
+  },
+  
+  "file_bubble": {
+    "btn_open": "Abrir",
+    "error_not_found": "Archivo no encontrado",
+    "error_opening": "Error al abrir el archivo"
+  },
+  
+  "network": {
+    "status_starting": "Iniciando motor de red...",
+    "status_stopping": "Deteniendo motor de red...",
+    "status_connected": "Conectado a {peer}",
+    "status_disconnected": "Desconectado de {peer}",
+    "error_send_failed": "Error al enviar mensaje",
+    "error_file_send_failed": "Error al enviar archivo",
+    "msg_file_received": "Archivo recibido de {username}: {filename}",
+    "msg_message_received": "Nuevo mensaje de {username}"
+  },
+  
+  "permissions": {
+    "requesting": "Solicitando permisos...",
+    "granted": "Permisos concedidos",
+    "denied": "Permisos denegados"
+  },
+  
+  "errors": {
+    "no_peer_selected": "Ningún par seleccionado",
+    "network_error": "Error de red: {error}",
+    "database_error": "Error de base de datos: {error}",
+    "config_error": "Error de configuración: {error}",
+    "unknown_error": "Ocurrió un error desconocido"
+  },
+  
+  "common": {
+    "ok": "Aceptar",
+    "cancel": "Cancelar",
+    "yes": "Sí",
+    "no": "No",
+    "save": "Guardar",
+    "delete": "Eliminar",
+    "close": "Cerrar",
+    "back": "Atrás",
+    "next": "Siguiente",
+    "done": "Listo",
+    "error": "Error",
+    "warning": "Advertencia",
+    "info": "Información",
+    "success": "Éxito"
+  },
+  
+  "time": {
+    "hours": "horas",
+    "minutes": "minutos",
+    "seconds": "segundos",
+    "days": "días",
+    "now": "ahora",
+    "today": "hoy",
+    "yesterday": "ayer"
+  },
+  
+  "units": {
+    "bytes": "B",
+    "kilobytes": "KB",
+    "megabytes": "MB",
+    "gigabytes": "GB",
+    "terabytes": "TB"
+  }
+}

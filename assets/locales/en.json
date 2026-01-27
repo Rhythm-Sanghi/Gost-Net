@@ -1,0 +1,186 @@
+{
+  "_comment": "Ghost Net - English (US) Translations",
+  "_version": "1.0.0",
+  "_language": "en",
+  "_language_name": "English",
+  
+  "app_name": "Ghost Net",
+  "app_tagline": "The Network is You",
+  "app_description": "Secure • Offline • Free",
+  "version": "v{version}",
+  
+  "boot_screen": {
+    "title": "👻 Ghost Net",
+    "tagline": "Secure • Offline • Free",
+    "status_initializing": "Initializing...",
+    "status_permissions": "Requesting permissions...",
+    "status_config": "Loading configuration...",
+    "status_database": "Initializing database...",
+    "status_network": "Starting P2P network...",
+    "status_cleanup": "Cleaning old messages...",
+    "status_ready": "Ready!",
+    "version_label": "v1.0.0"
+  },
+  
+  "radar_screen": {
+    "title": "👻 Ghost Net",
+    "status_scanning": "Scanning for peers...",
+    "status_no_peers": "No peers found. Waiting...",
+    "status_found_peers": "Found {count} peer(s)",
+    "section_peers": "Discovered Peers",
+    "btn_chat": "Chat",
+    "btn_settings": "Settings"
+  },
+  
+  "chat_screen": {
+    "title_prefix": "💬 ",
+    "title_default": "Select a peer",
+    "hint_message": "Type a message...",
+    "btn_send": "Send",
+    "btn_attach": "Attach file",
+    "btn_back": "Back"
+  },
+  
+  "settings_screen": {
+    "title": "⚙️ Settings",
+    "btn_back": "Back",
+    
+    "section_identity": "🪪 Identity",
+    "identity_subtitle": "Manage your display name",
+    "label_username": "Username",
+    "btn_update_username": "Update Username",
+    "msg_username_empty": "Username cannot be empty",
+    "msg_username_updated": "Username updated to '{username}'",
+    
+    "section_privacy": "🔒 Privacy",
+    "privacy_subtitle": "Control data retention and cleanup",
+    "label_retention": "Message Retention: {hours} hours",
+    "hint_retention": "Messages older than this will be auto-deleted",
+    "msg_retention_updated": "Retention hours updated to {hours}",
+    
+    "section_appearance": "🎨 Appearance",
+    "appearance_subtitle": "Customize the app look and feel",
+    "label_dark_mode": "Dark Mode",
+    "msg_dark_mode_enabled": "Dark mode enabled",
+    "msg_dark_mode_disabled": "Dark mode disabled",
+    
+    "section_language": "🌐 Language",
+    "language_subtitle": "Choose your preferred language",
+    "label_language": "Language",
+    "btn_change_language": "Change Language",
+    "msg_language_changed": "Language changed to {language}",
+    "msg_restart_required": "Restart app to apply language change",
+    
+    "section_about": "ℹ️ About",
+    "about_subtitle": "App information and credits",
+    "btn_about": "View App Info",
+    
+    "section_danger": "⚠️ Danger Zone",
+    "danger_subtitle": "Irreversible actions",
+    "btn_panic": "🔥 PANIC MODE - Delete All Data",
+    "hint_panic": "This will permanently delete all messages, files, and keys"
+  },
+  
+  "about_dialog": {
+    "title": "About Ghost Net",
+    "btn_close": "Close",
+    "label_version": "Version",
+    "label_build": "Build",
+    "label_framework": "Framework",
+    "label_license": "License",
+    "label_github": "GitHub",
+    "value_version": "1.0.0",
+    "value_build": "Production",
+    "value_framework": "KivyMD + Python",
+    "value_license": "Open Source",
+    "value_github": "github.com/yourusername/ghostnet"
+  },
+  
+  "panic_dialog": {
+    "title_confirm": "⚠️ Activate Panic Mode?",
+    "message_confirm": "This will delete ALL data:\n• All messages\n• All files\n• Encryption keys\n• App configuration\n\nThe app will exit immediately.",
+    "title_final": "⚠️ FINAL WARNING",
+    "message_final": "This action is IRREVERSIBLE!\n\nAll messages, files, encryption keys, and config will be permanently deleted.\n\nAre you ABSOLUTELY sure?",
+    "btn_cancel": "Cancel",
+    "btn_continue": "Continue",
+    "btn_delete": "DELETE EVERYTHING",
+    "msg_deleting": "Initiating data destruction...",
+    "msg_database_deleted": "Database deleted",
+    "msg_keys_deleted": "Encryption key deleted",
+    "msg_downloads_deleted": "Downloads deleted",
+    "msg_config_deleted": "Config deleted",
+    "msg_complete": "All data destroyed. Exiting..."
+  },
+  
+  "language_dialog": {
+    "title": "Select Language",
+    "btn_cancel": "Cancel",
+    "btn_apply": "Apply"
+  },
+  
+  "file_bubble": {
+    "btn_open": "Open",
+    "error_not_found": "File not found",
+    "error_opening": "Error opening file"
+  },
+  
+  "network": {
+    "status_starting": "Starting network engine...",
+    "status_stopping": "Stopping network engine...",
+    "status_connected": "Connected to {peer}",
+    "status_disconnected": "Disconnected from {peer}",
+    "error_send_failed": "Failed to send message",
+    "error_file_send_failed": "Failed to send file",
+    "msg_file_received": "File received from {username}: {filename}",
+    "msg_message_received": "New message from {username}"
+  },
+  
+  "permissions": {
+    "requesting": "Requesting permissions...",
+    "granted": "Permissions granted",
+    "denied": "Permissions denied"
+  },
+  
+  "errors": {
+    "no_peer_selected": "No peer selected",
+    "network_error": "Network error: {error}",
+    "database_error": "Database error: {error}",
+    "config_error": "Configuration error: {error}",
+    "unknown_error": "Unknown error occurred"
+  },
+  
+  "common": {
+    "ok": "OK",
+    "cancel": "Cancel",
+    "yes": "Yes",
+    "no": "No",
+    "save": "Save",
+    "delete": "Delete",
+    "close": "Close",
+    "back": "Back",
+    "next": "Next",
+    "done": "Done",
+    "error": "Error",
+    "warning": "Warning",
+    "info": "Info",
+    "success": "Success"
+  },
+  
+  "time": {
+    "hours": "hours",
+    "minutes": "minutes",
+    "seconds": "seconds",
+    "days": "days",
+    "now": "now",
+    "today": "today",
+    "yesterday": "yesterday"
+  },
+  
+  "units": {
+    "bytes": "B",
+    "kilobytes": "KB",
+    "megabytes": "MB",
+    "gigabytes": "GB",
+    "terabytes": "TB"
+  }
+}
