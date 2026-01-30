@@ -32,43 +32,47 @@ try:
     
     # Create fallback classes for optional components
     from kivy.uix.widget import Widget as KivyWidget
-    from kivy.uix.boxlayout import BoxLayout
+    from kivy.properties import BooleanProperty
     
     class _DummySpinner(KivyWidget):
         """Fallback spinner for KivyMD versions without MDSpinner."""
+        active = BooleanProperty(True)
+        
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
-            self.size_hint = kwargs.get('size_hint', (None, None))
-            self.size = kwargs.get('size', (46, 46))
-            self.pos_hint = kwargs.get('pos_hint', {})
-            self.active = kwargs.get('active', True)
     
     class _DummyDialog(KivyWidget):
         """Fallback dialog for KivyMD versions without MDDialog."""
         def __init__(self, *args, **kwargs):
             super().__init__(**kwargs)
-        def open(self): pass
-        def dismiss(self): pass
+        def open(self, *args): pass
+        def dismiss(self, *args): pass
     
     class _DummySwitch(KivyWidget):
         """Fallback switch for KivyMD versions without MDSwitch."""
+        active = BooleanProperty(False)
+        
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
-            self.active = kwargs.get('active', False)
     
     # Import optional components with fallbacks
     try:
-        from kivymd.uix.spinner import MDSpinner
+        # Try KivyMD 2.0+ first (MDCircularProgressIndicator)
+        from kivymd.uix.progressindicator import MDCircularProgressIndicator as MDSpinner
     except ImportError:
-        MDSpinner = _DummySpinner
+        try:
+            # Fall back to older MDSpinner
+            from kivymd.uix.spinner import MDSpinner
+        except ImportError:
+            MDSpinner = _DummySpinner
     
     try:
         from kivymd.uix.button import MDButtonText
         from kivymd.uix.textfield import MDTextFieldHintText, MDTextFieldHelperText
     except ImportError:
         MDButtonText = MDLabel
-        MDTextFieldHintText = lambda text: None
-        MDTextFieldHelperText = lambda text: None
+        MDTextFieldHintText = lambda **kwargs: Widget()
+        MDTextFieldHelperText = lambda **kwargs: Widget()
     
     try:
         from kivymd.uix.dialog import MDDialog, MDDialogHeadlineText, MDDialogContentContainer, MDDialogButtonContainer
