@@ -182,7 +182,7 @@ class GhostEngine:
             return encrypted.decode('utf-8', errors='ignore')
     
     def start(self):
-        """Start the network engine (discovery + messaging)."""
+        """Start the network engine (discovery + messaging) with safe error handling."""
         if self.running:
             print("[GhostEngine] Already running.")
             return
@@ -190,44 +190,115 @@ class GhostEngine:
         self.running = True
         print(f"[GhostEngine] Starting as '{self.username}' on {self.local_ip}")
         
-        # Initialize UDP socket for discovery
+        # Initialize UDP socket for discovery with retry logic
+        udp_success = False
+        for port_offset in range(0, 5):  # Try ports 37020-37024
+            try:
+                udp_port = self.UDP_PORT + port_offset
+                self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                self.udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                self.udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                self.udp_socket.bind(('', udp_port))
+                self.udp_socket.settimeout(1.0)  # Non-blocking with timeout
+                self.UDP_PORT = udp_port  # Update to working port
+                print(f"[GhostEngine] UDP socket bound to port {udp_port}")
+                udp_success = True
+                break
+            except OSError as e:
+                print(f"[GhostEngine] UDP port {udp_port} failed: {e}")
+                if self.udp_socket:
+                    try:
+                        self.udp_socket.close()
+                    except:
+                        pass
+                continue
+            except Exception as e:
+                print(f"[GhostEngine] UDP socket error: {e}")
+                break
+        
+        if not udp_success:
+            print("[GhostEngine] CRITICAL: Could not bind UDP socket - continuing without discovery")
+            self.udp_socket = None
+        
+        # Initialize TCP server socket for incoming messages with retry logic
+        tcp_success = False
+        for port_offset in range(0, 5):  # Try ports 37021-37025
+            try:
+                tcp_port = self.TCP_PORT + port_offset
+                self.tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.tcp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                self.tcp_socket.bind(('0.0.0.0', tcp_port))
+                self.tcp_socket.listen(5)
+                self.tcp_socket.settimeout(1.0)
+                self.TCP_PORT = tcp_port  # Update to working port
+                print(f"[GhostEngine] TCP server listening on port {tcp_port}")
+                tcp_success = True
+                break
+            except OSError as e:
+                print(f"[GhostEngine] TCP port {tcp_port} failed: {e}")
+                if self.tcp_socket:
+                    try:
+                        self.tcp_socket.close()
+                    except:
+                        pass
+                continue
+            except Exception as e:
+                print(f"[GhostEngine] TCP socket error: {e}")
+                break
+        
+        if not tcp_success:
+            print("[GhostEngine] CRITICAL: Could not bind TCP socket - continuing without messaging")
+            self.tcp_socket = None
+        
+        # Don't fail completely if sockets fail - continue with limited functionality
+        if not udp_success and not tcp_success:
+            print("[GhostEngine] WARNING: No network sockets available - running in offline mode")
+        
+        # Start background threads with safe error handling
+        threads_started = 0
+        
+        # Only start UDP threads if UDP socket is available
+        if self.udp_socket:
+            try:
+                self.beacon_thread = threading.Thread(target=self._beacon_worker, daemon=True)
+                self.beacon_thread.start()
+                threads_started += 1
+                print("[GhostEngine] Beacon thread started")
+            except Exception as e:
+                print(f"[GhostEngine] Failed to start beacon thread: {e}")
+            
+            try:
+                self.listener_thread = threading.Thread(target=self._udp_listener_worker, daemon=True)
+                self.listener_thread.start()
+                threads_started += 1
+                print("[GhostEngine] UDP listener thread started")
+            except Exception as e:
+                print(f"[GhostEngine] Failed to start UDP listener thread: {e}")
+        
+        # Only start TCP thread if TCP socket is available
+        if self.tcp_socket:
+            try:
+                self.tcp_server_thread = threading.Thread(target=self._tcp_server_worker, daemon=True)
+                self.tcp_server_thread.start()
+                threads_started += 1
+                print("[GhostEngine] TCP server thread started")
+            except Exception as e:
+                print(f"[GhostEngine] Failed to start TCP server thread: {e}")
+        
+        # Always start pruning thread
         try:
-            self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self.udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            self.udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.udp_socket.bind(('', self.UDP_PORT))
-            self.udp_socket.settimeout(1.0)  # Non-blocking with timeout
-            print(f"[GhostEngine] UDP socket bound to port {self.UDP_PORT}")
+            self.pruning_thread = threading.Thread(target=self._pruning_worker, daemon=True)
+            self.pruning_thread.start()
+            threads_started += 1
+            print("[GhostEngine] Pruning thread started")
         except Exception as e:
-            print(f"[GhostEngine] UDP socket error: {e}")
-            self.running = False
-            return
+            print(f"[GhostEngine] Failed to start pruning thread: {e}")
         
-        # Initialize TCP server socket for incoming messages
-        try:
-            self.tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.tcp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.tcp_socket.bind(('0.0.0.0', self.TCP_PORT))
-            self.tcp_socket.listen(5)
-            self.tcp_socket.settimeout(1.0)
-            print(f"[GhostEngine] TCP server listening on port {self.TCP_PORT}")
-        except Exception as e:
-            print(f"[GhostEngine] TCP socket error: {e}")
-            self.running = False
-            return
+        print(f"[GhostEngine] {threads_started} threads started successfully.")
         
-        # Start background threads
-        self.beacon_thread = threading.Thread(target=self._beacon_worker, daemon=True)
-        self.listener_thread = threading.Thread(target=self._udp_listener_worker, daemon=True)
-        self.tcp_server_thread = threading.Thread(target=self._tcp_server_worker, daemon=True)
-        self.pruning_thread = threading.Thread(target=self._pruning_worker, daemon=True)
-        
-        self.beacon_thread.start()
-        self.listener_thread.start()
-        self.tcp_server_thread.start()
-        self.pruning_thread.start()
-        
-        print("[GhostEngine] All threads started successfully.")
+        # Don't fail if no threads started - app can still function with limited capability
+        if threads_started == 0:
+            print("[GhostEngine] WARNING: No background threads started - limited functionality")
     
     def stop(self):
         """Stop the network engine and clean up resources."""
@@ -238,13 +309,13 @@ class GhostEngine:
         if self.udp_socket:
             try:
                 self.udp_socket.close()
-            except:
+            except (OSError, AttributeError):
                 pass
         
         if self.tcp_socket:
             try:
                 self.tcp_socket.close()
-            except:
+            except (OSError, AttributeError):
                 pass
         
         # Wait for threads to finish
@@ -259,6 +330,11 @@ class GhostEngine:
         """Broadcast beacon packets every BEACON_INTERVAL seconds."""
         while self.running:
             try:
+                # Skip if no UDP socket available
+                if not self.udp_socket:
+                    time.sleep(self.BEACON_INTERVAL)
+                    continue
+                
                 # Get current username from config (supports dynamic updates)
                 current_username = self.username
                 if self.config_manager:
@@ -284,6 +360,11 @@ class GhostEngine:
         """Listen for incoming UDP beacon packets."""
         while self.running:
             try:
+                # Skip if no UDP socket available
+                if not self.udp_socket:
+                    time.sleep(1)
+                    continue
+                
                 data, addr = self.udp_socket.recvfrom(self.BUFFER_SIZE)
                 sender_ip = addr[0]
                 
@@ -357,6 +438,11 @@ class GhostEngine:
         """Accept incoming TCP connections and handle messages."""
         while self.running:
             try:
+                # Skip if no TCP socket available
+                if not self.tcp_socket:
+                    time.sleep(1)
+                    continue
+                
                 conn, addr = self.tcp_socket.accept()
                 # Handle each connection in a separate thread
                 threading.Thread(
@@ -393,8 +479,8 @@ class GhostEngine:
                     try:
                         header_json = self._decrypt_message(header_part)
                         header = json.loads(header_json)
-                    except:
-                        print(f"[TCP Handler] Invalid header from {sender_ip}")
+                    except (ValueError, json.JSONDecodeError) as e:
+                        print(f"[TCP Handler] Invalid header from {sender_ip}: {e}")
                         return
                     
                     # Process based on type

@@ -4,22 +4,31 @@ Material Design P2P messaging app using KivyMD.
 Offline-first, local network communication with file transfer support.
 """
 
-from kivymd.app import MDApp
-from kivymd.uom import dp
-from kivymd.uix.screen import MDScreen
-from kivymd.uix.screenmanager import MDScreenManager
-from kivymd.uix.list import MDListItem, MDListItemHeadlineText, MDListItemSupportingText
-from kivymd.uix.button import MDButton, MDButtonText, MDIconButton, MDFabButton
-from kivymd.uix.textfield import MDTextField, MDTextFieldHintText, MDTextFieldHelperText
-from kivymd.uix.label import MDLabel
-from kivymd.uix.boxlayout import MDBoxLayout
-from kivymd.uix.scrollview import MDScrollView
-from kivymd.uix.card import MDCard
-from kivymd.uix.filemanager import MDFileManager
-from kivymd.uix.slider import MDSlider
-from kivymd.uix.switch import MDSwitch
-from kivymd.uix.dialog import MDDialog, MDDialogHeadlineText, MDDialogContentContainer, MDDialogButtonContainer
-from kivymd.uix.spinner import MDSpinner
+# Safe imports with error handling for Android compatibility
+try:
+    from kivymd.app import MDApp
+    from kivy.metrics import dp
+    from kivymd.uix.screen import MDScreen
+    from kivymd.uix.screenmanager import MDScreenManager
+    from kivymd.uix.list import MDListItem, MDListItemHeadlineText, MDListItemSupportingText
+    from kivymd.uix.button import MDButton, MDButtonText, MDIconButton, MDFabButton
+    from kivymd.uix.textfield import MDTextField, MDTextFieldHintText, MDTextFieldHelperText
+    from kivymd.uix.label import MDLabel
+    from kivymd.uix.boxlayout import MDBoxLayout
+    from kivymd.uix.scrollview import MDScrollView
+    from kivymd.uix.card import MDCard
+    from kivymd.uix.filemanager import MDFileManager
+    from kivymd.uix.slider import MDSlider
+    from kivymd.uix.switch import MDSwitch
+    from kivymd.uix.dialog import MDDialog, MDDialogHeadlineText, MDDialogContentContainer, MDDialogButtonContainer
+    from kivymd.uix.spinner import MDSpinner
+    KIVYMD_AVAILABLE = True
+except ImportError as e:
+    print(f"[CRITICAL] KivyMD import failed: {e}")
+    print("[CRITICAL] Please ensure KivyMD v1.1.1 is properly installed")
+    print("[CRITICAL] Run: pip install kivymd==1.1.1")
+    import sys
+    sys.exit(1)
 from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.properties import StringProperty, ListProperty, NumericProperty
@@ -583,11 +592,12 @@ class ChatScreen(MDScreen):
         """Load chat history from database."""
         app = MDApp.get_running_app()
         
-        if not app.engine or not app.engine.db_manager:
+        if not app or not app.engine or not app.engine.db_manager:
             print("[ChatScreen] No database manager available")
             return
         
         if not self.peer_ip:
+            print("[ChatScreen] No peer IP set")
             return
         
         try:
@@ -632,6 +642,10 @@ class ChatScreen(MDScreen):
         app = MDApp.get_running_app()
         
         # Send via network engine
+        if not app or not app.engine:
+            print("[ChatScreen] Engine not available")
+            return
+        
         success = app.engine.send_message(self.peer_ip, message_text)
         
         if success:
@@ -702,6 +716,9 @@ class ChatScreen(MDScreen):
         
         # Send file via network engine
         app = MDApp.get_running_app()
+        if not app or not app.engine:
+            print("[ChatScreen] Engine not available")
+            return
         app.engine.send_file(self.peer_ip, path)
         
         # Add to UI as sent file bubble
@@ -1230,6 +1247,10 @@ class GhostNetApp(MDApp):
     
     def on_start(self):
         """Called when the app starts - now with async boot sequence."""
+        # Create required directories
+        os.makedirs("downloads", exist_ok=True)
+        os.makedirs("assets/locales", exist_ok=True)
+        
         # Start on boot screen
         self.root.current = 'boot'
         
@@ -1373,22 +1394,45 @@ class GhostNetApp(MDApp):
         threading.Thread(target=_cleanup_worker, daemon=True).start()
     
     def request_permissions(self):
-        """Request storage permissions on Android."""
+        """Request storage permissions on Android with safe error handling."""
         if platform.system() == 'Android':
             try:
                 from android.permissions import request_permissions, Permission
-                request_permissions([
-                    Permission.WRITE_EXTERNAL_STORAGE,
-                    Permission.READ_EXTERNAL_STORAGE,
-                    Permission.INTERNET,
-                    Permission.ACCESS_NETWORK_STATE,
-                    Permission.ACCESS_WIFI_STATE
-                ])
-                print("[GhostNet] Android permissions requested")
-            except ImportError:
-                print("[GhostNet] Android permissions module not available")
+                
+                # For Android API 33+, handle scoped storage
+                permissions_to_request = []
+                
+                # Check if permissions exist before requesting
+                if hasattr(Permission, 'INTERNET'):
+                    permissions_to_request.append(Permission.INTERNET)
+                if hasattr(Permission, 'ACCESS_NETWORK_STATE'):
+                    permissions_to_request.append(Permission.ACCESS_NETWORK_STATE)
+                if hasattr(Permission, 'ACCESS_WIFI_STATE'):
+                    permissions_to_request.append(Permission.ACCESS_WIFI_STATE)
+                
+                # Storage permissions - handle API level differences
+                if hasattr(Permission, 'READ_EXTERNAL_STORAGE'):
+                    permissions_to_request.append(Permission.READ_EXTERNAL_STORAGE)
+                if hasattr(Permission, 'WRITE_EXTERNAL_STORAGE'):
+                    permissions_to_request.append(Permission.WRITE_EXTERNAL_STORAGE)
+                
+                if permissions_to_request:
+                    request_permissions(permissions_to_request)
+                    print(f"[GhostNet] Requested {len(permissions_to_request)} Android permissions")
+                else:
+                    print("[GhostNet] No permissions to request")
+                    
+            except ImportError as e:
+                print(f"[GhostNet] Android permissions module not available: {e}")
+                # Continue without permissions on non-Android or if module missing
+            except AttributeError as e:
+                print(f"[GhostNet] Permission attribute missing (API level issue): {e}")
+                # Continue - may be running on newer Android API
             except Exception as e:
                 print(f"[GhostNet] Permission request error: {e}")
+                # Don't crash - continue app execution
+        else:
+            print("[GhostNet] Not on Android - permissions not needed")
     
     def on_stop(self):
         """Called when the app stops."""
