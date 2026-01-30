@@ -5,8 +5,9 @@
 kivy==2.3.0
 # Latest stable KivyMD (master branch used in buildozer for 2.0 API support)
 kivymd==1.2.0
-# Required by KivyMD 2.0+ for async support
+# Required by KivyMD 2.0+ for async support in Material Design 3 animations
 asynckivy
+asyncgui
 # Required by KivyMD for Material Design theming
 materialyoucolor
 
