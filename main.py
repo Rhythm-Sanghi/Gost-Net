@@ -5,6 +5,17 @@ Offline-first, local network communication with file transfer support.
 """
 
 # Safe imports with error handling for Android compatibility
+def _safe_import(module_path, name, fallback_class=None):
+    """Safely import a module, returning fallback class if unavailable."""
+    try:
+        parts = module_path.rsplit('.', 1)
+        module = __import__(module_path, fromlist=[name])
+        return getattr(module, name)
+    except (ImportError, AttributeError):
+        if fallback_class:
+            return fallback_class
+        raise
+
 try:
     from kivymd.app import MDApp
     from kivy.metrics import dp
@@ -18,48 +29,58 @@ try:
     from kivymd.uix.card import MDCard
     from kivymd.uix.filemanager import MDFileManager
     from kivymd.uix.slider import MDSlider
-    from kivymd.uix.spinner import MDSpinner
     
-    # Try importing newer 2.0 API components, fallback to basic widgets if unavailable
+    # Create fallback classes for optional components
+    class _DummySpinner:
+        """Fallback spinner for KivyMD versions without MDSpinner."""
+        def __init__(self, **kwargs):
+            self.size_hint = kwargs.get('size_hint', (None, None))
+            self.size = kwargs.get('size', (46, 46))
+            self.pos_hint = kwargs.get('pos_hint', {})
+            self.active = kwargs.get('active', True)
+    
+    class _DummyDialog:
+        """Fallback dialog for KivyMD versions without MDDialog."""
+        def __init__(self, *args, **kwargs): pass
+        def open(self): pass
+        def dismiss(self): pass
+    
+    class _DummySwitch:
+        """Fallback switch for KivyMD versions without MDSwitch."""
+        def __init__(self, **kwargs):
+            self.active = kwargs.get('active', False)
+    
+    # Import optional components with fallbacks
+    try:
+        from kivymd.uix.spinner import MDSpinner
+    except ImportError:
+        MDSpinner = _DummySpinner
+    
     try:
         from kivymd.uix.button import MDButtonText
         from kivymd.uix.textfield import MDTextFieldHintText, MDTextFieldHelperText
     except ImportError:
-        # Fallback for KivyMD 1.2.0 - use basic components
         MDButtonText = MDLabel
         MDTextFieldHintText = lambda text: None
         MDTextFieldHelperText = lambda text: None
     
-    # Try Dialog imports separately
     try:
         from kivymd.uix.dialog import MDDialog, MDDialogHeadlineText, MDDialogContentContainer, MDDialogButtonContainer
     except ImportError:
-        # Fallback - create dummy classes that don't crash
-        class MDDialog:
-            def __init__(self, *args, **kwargs): pass
-            def open(self): pass
-            def dismiss(self): pass
+        MDDialog = _DummyDialog
         MDDialogHeadlineText = MDLabel
         MDDialogContentContainer = MDBoxLayout
         MDDialogButtonContainer = MDBoxLayout
     
-    # MDSwitch - try both import styles
     try:
         from kivymd.uix.switch import MDSwitch
     except ImportError:
-        # Fallback: create a dummy widget that doesn't crash
-        from kivy.uix.togglebutton import ToggleButton
-        class MDSwitch(ToggleButton):
-            def __init__(self, **kwargs):
-                super().__init__(**kwargs)
-                self.background_normal = ''
-                self.background_down = ''
+        MDSwitch = _DummySwitch
     
     KIVYMD_AVAILABLE = True
 except ImportError as e:
     print(f"[CRITICAL] KivyMD import failed: {e}")
-    print("[CRITICAL] Please ensure KivyMD v1.2.0 is properly installed")
-    print("[CRITICAL] Run: pip install kivymd==1.2.0")
+    print("[CRITICAL] Please ensure KivyMD is properly installed")
     import sys
     sys.exit(1)
 from kivy.clock import Clock
