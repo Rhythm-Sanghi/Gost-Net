@@ -1247,12 +1247,20 @@ class GhostNetApp(MDApp):
     
     def on_start(self):
         """Called when the app starts - now with async boot sequence."""
-        # Create required directories
-        os.makedirs("downloads", exist_ok=True)
-        os.makedirs("assets/locales", exist_ok=True)
+        # Create required directories (only user-writable ones)
+        try:
+            # Only create downloads directory (not assets, which is in APK)
+            downloads_path = os.path.join(os.path.expanduser("~"), "Downloads", "GhostNet")
+            os.makedirs(downloads_path, exist_ok=True)
+            print(f"[GhostNet] Downloads directory: {downloads_path}")
+        except Exception as e:
+            print(f"[GhostNet] Warning: Could not create downloads directory: {e}")
         
         # Start on boot screen
-        self.root.current = 'boot'
+        try:
+            self.root.current = 'boot'
+        except Exception as e:
+            print(f"[GhostNet] Error switching to boot screen: {e}")
         
         # Run startup checks in background
         threading.Thread(target=self.startup_checks, daemon=True).start()
@@ -1262,33 +1270,58 @@ class GhostNetApp(MDApp):
         Perform startup initialization in background thread.
         Updates boot screen status and transitions to radar when complete.
         """
-        boot_screen = self.root.get_screen('boot')
+        # Safely get boot screen with error handling
+        try:
+            boot_screen = self.root.get_screen('boot')
+            if not boot_screen:
+                print("[GhostNet] Boot screen not available")
+                return
+        except Exception as e:
+            print(f"[GhostNet] Error accessing boot screen: {e}")
+            return
         
         try:
-            # Step 1: Request permissions
-            Clock.schedule_once(
-                lambda dt: boot_screen.update_status("Requesting permissions..."),
-                0
-            )
-            self.request_permissions()
+            # Step 1: Request permissions (move to UI thread to avoid threading issues)
+            def request_perms_ui():
+                boot_screen.update_status("Requesting permissions...")
+                self.request_permissions()
+            
+            Clock.schedule_once(lambda dt: request_perms_ui(), 0)
             time.sleep(0.5)
             
-            # Step 2: Load configuration
+            # Step 2: Load configuration with error handling
             Clock.schedule_once(
                 lambda dt: boot_screen.update_status("Loading configuration..."),
                 0
             )
-            self.config = get_config()
             
-            # Apply theme from config
-            theme_style = "Dark" if self.config.is_dark_mode() else "Light"
-            Clock.schedule_once(
-                lambda dt: setattr(self.theme_cls, 'theme_style', theme_style),
-                0
-            )
+            try:
+                self.config = get_config()
+            except Exception as e:
+                print(f"[GhostNet] Config initialization error: {e}")
+                self.config = None
+                # Continue with defaults
             
-            # Register config change callback for hot-reloading
-            self.config.register_change_callback(self.on_config_changed)
+            if self.config:
+                try:
+                    # Apply theme from config
+                    theme_style = "Dark" if self.config.is_dark_mode() else "Light"
+                    Clock.schedule_once(
+                        lambda dt: setattr(self.theme_cls, 'theme_style', theme_style),
+                        0
+                    )
+                except Exception as e:
+                    print(f"[GhostNet] Theme application error: {e}")
+            
+            # Defer callback registration until UI is fully initialized
+            def register_config_callback():
+                if self.config:
+                    try:
+                        self.config.register_change_callback(self.on_config_changed)
+                    except Exception as e:
+                        print(f"[GhostNet] Config callback registration error: {e}")
+            
+            Clock.schedule_once(lambda dt: register_config_callback(), 0.5)
             
             # Get username from config
             self.username = self.config.get_username()
@@ -1307,17 +1340,22 @@ class GhostNetApp(MDApp):
                 0
             )
             
-            self.engine = GhostEngine(
-                config_manager=self.config,
-                on_message_received=self.handle_message_received,
-                on_peer_update=self.handle_peer_update,
-                on_file_received=self.handle_file_received,
-                enable_storage=True
-            )
-            
-            # Start engine in background
-            threading.Thread(target=self.engine.start, daemon=True).start()
-            time.sleep(1.0)
+            try:
+                self.engine = GhostEngine(
+                    config_manager=self.config,
+                    on_message_received=self.handle_message_received,
+                    on_peer_update=self.handle_peer_update,
+                    on_file_received=self.handle_file_received,
+                    enable_storage=True
+                )
+                
+                # Start engine in background
+                threading.Thread(target=self.engine.start, daemon=True).start()
+                time.sleep(1.0)
+            except Exception as e:
+                print(f"[GhostNet] Engine initialization error: {e}")
+                self.engine = None
+                # Continue - app can work without networking
             
             # Step 5: Run privacy cleanup
             Clock.schedule_once(
@@ -1347,30 +1385,44 @@ class GhostNetApp(MDApp):
             
         except Exception as e:
             print(f"[GhostNet] Startup error: {e}")
-            Clock.schedule_once(
-                lambda dt: boot_screen.update_status(f"Error: {str(e)}"),
-                0
-            )
-            time.sleep(3)
-            # Still try to go to radar screen even on error
-            Clock.schedule_once(
-                lambda dt: setattr(self.root, 'current', 'radar'),
-                0
-            )
+            import traceback
+            traceback.print_exc()
+            
+            try:
+                Clock.schedule_once(
+                    lambda dt: boot_screen.update_status(f"Error: {str(e)[:30]}..."),
+                    0
+                )
+            except:
+                pass
+            
+            time.sleep(2)
+            # Always transition to radar screen even on error
+            try:
+                Clock.schedule_once(
+                    lambda dt: setattr(self.root, 'current', 'radar'),
+                    0
+                )
+            except Exception as e2:
+                print(f"[GhostNet] Could not transition to radar: {e2}")
     
     def on_config_changed(self, key: str, old_value, new_value):
         """Handle configuration changes for hot-reloading."""
-        print(f"[GhostNet] Config changed: {key} = {old_value} → {new_value}")
-        
-        if key == "dark_mode":
-            # Hot-reload theme
-            self.theme_cls.theme_style = "Dark" if new_value else "Light"
-            print(f"[GhostNet] Theme changed to {'Dark' if new_value else 'Light'} mode")
-        
-        elif key == "username":
-            # Update local username reference
-            self.username = new_value
-            print(f"[GhostNet] Username updated to '{new_value}'")
+        try:
+            print(f"[GhostNet] Config changed: {key} = {old_value} → {new_value}")
+            
+            if key == "dark_mode":
+                # Hot-reload theme (check theme_cls exists)
+                if hasattr(self, 'theme_cls') and self.theme_cls:
+                    self.theme_cls.theme_style = "Dark" if new_value else "Light"
+                    print(f"[GhostNet] Theme changed to {'Dark' if new_value else 'Light'} mode")
+            
+            elif key == "username":
+                # Update local username reference
+                self.username = new_value
+                print(f"[GhostNet] Username updated to '{new_value}'")
+        except Exception as e:
+            print(f"[GhostNet] Config change handler error: {e}")
     
     def cleanup_old_messages(self, hours: int = 24):
         """

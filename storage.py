@@ -37,18 +37,38 @@ class DatabaseManager:
         self.key_path = key_path
         self.cipher = None
         self.db_lock = threading.Lock()
+        self.initialization_error = None
         
-        # Initialize encryption and database
-        self._initialize_encryption()
-        self._initialize_database()
+        # Initialize encryption and database with error handling
+        try:
+            self._initialize_encryption()
+        except Exception as e:
+            self.initialization_error = f"Encryption init failed: {e}"
+            print(f"[DatabaseManager] WARNING: {self.initialization_error}")
         
-        print(f"[DatabaseManager] Initialized with database: {db_path}")
+        try:
+            self._initialize_database()
+        except Exception as e:
+            self.initialization_error = f"Database init failed: {e}"
+            print(f"[DatabaseManager] WARNING: {self.initialization_error}")
+        
+        if self.cipher:
+            print(f"[DatabaseManager] Initialized with database: {db_path}")
+        else:
+            print(f"[DatabaseManager] Initialized with limited functionality (encryption unavailable)")
     
     def _initialize_encryption(self):
         """Initialize or load the encryption key."""
-        key = self._get_or_create_key()
-        self.cipher = Fernet(key)
-        print("[DatabaseManager] Encryption initialized")
+        try:
+            key = self._get_or_create_key()
+            if key:
+                self.cipher = Fernet(key)
+                print("[DatabaseManager] Encryption initialized")
+            else:
+                print("[DatabaseManager] WARNING: No encryption key available")
+        except Exception as e:
+            print(f"[DatabaseManager] Encryption initialization failed: {e}")
+            raise
     
     def _get_or_create_key(self) -> bytes:
         """
@@ -107,7 +127,9 @@ class DatabaseManager:
         """Create database tables if they don't exist."""
         with self.db_lock:
             try:
-                conn = sqlite3.connect(self.db_path)
+                # Add timeout to prevent hanging on first connection
+                conn = sqlite3.connect(self.db_path, timeout=10.0)
+                conn.execute('PRAGMA busy_timeout = 10000')  # 10 second timeout
                 cursor = conn.cursor()
                 
                 # Peers table

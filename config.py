@@ -40,15 +40,32 @@ class ConfigManager:
         Args:
             config_path: Path to configuration file
         """
+        # Use platform-aware paths
+        import platform
+        if platform.system() == 'Android':
+            from kivy.core.window import Window
+            # On Android, use app-specific storage
+            config_path = os.path.join(os.path.expanduser("~"), ".ghostnet", config_path)
+            os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        
         self.config_path = config_path
         self.config: Dict[str, Any] = {}
         self.config_lock = threading.Lock()
         self.change_callbacks = []
+        self.initialization_error = None
         
-        # Load or create config
-        self.load()
-        
-        print(f"[ConfigManager] Initialized with config: {self.config_path}")
+        # Load or create config with error handling
+        try:
+            self.load()
+            print(f"[ConfigManager] Initialized with config: {self.config_path}")
+        except Exception as e:
+            self.initialization_error = str(e)
+            print(f"[ConfigManager] WARNING: Config initialization failed: {e}")
+            print("[ConfigManager] Using default configuration")
+            # Still initialize with defaults
+            with self.config_lock:
+                self.config = self.DEFAULT_CONFIG.copy()
+                self.config["username"] = self._generate_random_username()
     
     def _generate_random_username(self) -> str:
         """Generate a random username for first-time users."""
