@@ -20,8 +20,8 @@ version = 1.0.0
 
 # (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy
-# Use stable KivyMD 1.2.0 which has all required components (switch module, etc.)
-requirements = python3,kivy==2.3.0,kivymd==1.2.0,pillow,cryptography==41.0.7,openssl,libffi
+# KivyMD 2.0.1 requires asynckivy for async support in Material Design 3
+requirements = python3,kivy==2.3.0,kivymd==1.2.0,asynckivy,pillow,cryptography==41.0.7,openssl,libffi
 
 # (str) Custom source folders for requirements
 # Sets custom source for any requirements with recipes
