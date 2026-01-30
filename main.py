@@ -10,23 +10,44 @@ try:
     from kivy.metrics import dp
     from kivymd.uix.screen import MDScreen
     from kivymd.uix.screenmanager import MDScreenManager
-    from kivymd.uix.list import MDListItem, MDListItemHeadlineText, MDListItemSupportingText
-    from kivymd.uix.button import MDButton, MDButtonText, MDIconButton, MDFabButton
-    from kivymd.uix.textfield import MDTextField, MDTextFieldHintText, MDTextFieldHelperText
+    from kivymd.uix.button import MDButton, MDIconButton
+    from kivymd.uix.textfield import MDTextField
     from kivymd.uix.label import MDLabel
     from kivymd.uix.boxlayout import MDBoxLayout
     from kivymd.uix.scrollview import MDScrollView
     from kivymd.uix.card import MDCard
     from kivymd.uix.filemanager import MDFileManager
     from kivymd.uix.slider import MDSlider
-    from kivymd.uix.switch import MDSwitch
-    from kivymd.uix.dialog import MDDialog, MDDialogHeadlineText, MDDialogContentContainer, MDDialogButtonContainer
-    from kivymd.uix.spinner import MDSpinner
+    # Try importing newer 2.0 API components, fallback to basic widgets if unavailable
+    try:
+        from kivymd.uix.button import MDButtonText
+        from kivymd.uix.textfield import MDTextFieldHintText, MDTextFieldHelperText
+        from kivymd.uix.dialog import MDDialog, MDDialogHeadlineText, MDDialogContentContainer, MDDialogButtonContainer
+        from kivymd.uix.spinner import MDSpinner
+    except ImportError:
+        # Fallback for KivyMD 1.2.0 - use basic components
+        MDButtonText = MDLabel
+        MDTextFieldHintText = lambda text: None
+        MDTextFieldHelperText = lambda text: None
+        MDDialog = None
+        MDDialogHeadlineText = MDLabel
+        MDDialogContentContainer = MDBoxLayout
+        MDDialogButtonContainer = MDBoxLayout
+        MDSpinner = None
+    
+    # MDSwitch - try both import styles
+    try:
+        from kivymd.uix.switch import MDSwitch
+    except ImportError:
+        # Fallback: use a checkbox or basic button
+        from kivy.uix.widget import Widget
+        MDSwitch = Widget
+    
     KIVYMD_AVAILABLE = True
 except ImportError as e:
     print(f"[CRITICAL] KivyMD import failed: {e}")
-    print("[CRITICAL] Please ensure KivyMD v1.1.1 is properly installed")
-    print("[CRITICAL] Run: pip install kivymd==1.1.1")
+    print("[CRITICAL] Please ensure KivyMD v1.2.0 is properly installed")
+    print("[CRITICAL] Run: pip install kivymd==1.2.0")
     import sys
     sys.exit(1)
 from kivy.clock import Clock
