@@ -1,0 +1,9 @@
+{
+  "username": "BulkUpdated",
+  "retention_hours": 24,
+  "dark_mode": true,
+  "auto_cleanup": true,
+  "notification_sound": true,
+  "save_files": true,
+  "max_file_size_mb": 100
+}

@@ -203,6 +203,10 @@ android.enable_androidx = True
 # Valid values can be found at https://developer.android.com/guide/topics/manifest/activity-element
 #android.manifest.orientation = fullSensor
 
+# (str) Custom manifest activity attributes for keyboard handling
+# adjustResize: Resize activity when keyboard appears (required for proper keyboard handling)
+android.manifest.activity_attrs = {"android:windowSoftInputMode": "adjustResize|stateHidden"}
+
 # (list) Android additional libraries to copy into libs/armeabi
 #android.add_libs_armeabi = libs/android/*.so
 #android.add_libs_armeabi_v7a = libs/android-v7/*.so

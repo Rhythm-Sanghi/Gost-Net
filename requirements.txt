@@ -14,6 +14,9 @@ materialyoucolor
 # Cryptography
 cryptography>=41.0.0
 
+# Network utilities (for multi-interface detection)
+netifaces>=0.11.0
+
 # Image processing (required by Kivy)
 pillow>=10.0.0
 

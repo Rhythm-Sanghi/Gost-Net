@@ -109,6 +109,11 @@ import time
 from network import GhostEngine
 from config import get_config
 
+# Configure soft input mode for Android keyboard handling
+if platform.system() == 'Android':
+    from kivy.core.window import Window
+    Window.keyboard_anim_args = {'d': 0.2, 't': 'in_out_cubic'}
+
 
 class BootScreen(MDScreen):
     """Initial boot screen with loading animation."""
@@ -245,7 +250,7 @@ class RadarWidget(Widget):
 
 
 class RadarScreen(MDScreen):
-    """Home screen showing discovered peers with radar animation."""
+    """Home screen showing discovered peers with radar animation and network info."""
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -267,7 +272,17 @@ class RadarScreen(MDScreen):
             halign='center',
             font_style='Display',
             role='small',
-            size_hint_x=0.8
+            size_hint_x=0.6
+        )
+        
+        # Network status badge
+        self.network_badge = MDLabel(
+            text="📶 Detecting...",
+            halign='right',
+            font_style='Body',
+            role='small',
+            theme_text_color='Secondary',
+            size_hint_x=0.2
         )
         
         settings_btn = MDIconButton(
@@ -277,6 +292,7 @@ class RadarScreen(MDScreen):
         settings_btn.bind(on_release=self.open_settings)
         
         header.add_widget(title)
+        header.add_widget(self.network_badge)
         header.add_widget(settings_btn)
         layout.add_widget(header)
         
@@ -314,6 +330,28 @@ class RadarScreen(MDScreen):
         layout.add_widget(self.peers_scroll)
         
         self.add_widget(layout)
+    
+    def update_network_status(self, network_info):
+        """Update network status badge."""
+        try:
+            net_type = network_info.get('type', 'unknown')
+            ip = network_info.get('ip', 'N/A')
+            
+            # Icon mapping
+            icons = {
+                'wifi': '📶',
+                'hotspot': '📡',
+                'cellular': '📱',
+                'ethernet': '🔌',
+                'private': '🔒',
+                'unknown': '❓'
+            }
+            
+            icon = icons.get(net_type, '❓')
+            self.network_badge.text = f"{icon} {net_type.capitalize()}"
+        except Exception as e:
+            print(f"[RadarScreen] Error updating network status: {e}")
+            self.network_badge.text = "❓ Unknown"
     
     def update_peers(self, peers_dict):
         """Update the peers list (called from main thread via Clock)."""
@@ -384,50 +422,65 @@ class RadarScreen(MDScreen):
 
 
 class MessageBubble(MDCard):
-    """Custom message bubble widget for text messages."""
+    """Custom message bubble widget for text messages with adaptive height."""
     
     def __init__(self, message, timestamp, is_sent=False, **kwargs):
         super().__init__(**kwargs)
         
         self.style = 'elevated'
+        self.adaptive_height = True  # ✅ Adapt to content
         self.size_hint_y = None
-        self.height = dp(60)
+        self.minimum_height = dp(60)  # Minimum height for small messages
         self.padding = dp(10)
+        self.spacing = dp(5)
         
         # Color coding: sent (blue) vs received (grey)
         if is_sent:
             self.md_bg_color = (0.2, 0.4, 0.8, 1)
             self.pos_hint = {'right': 0.95}
-            self.size_hint_x = 0.7
+            self.size_hint_x = 0.75  # Slightly wider for better text flow
         else:
             self.md_bg_color = (0.3, 0.3, 0.3, 1)
             self.pos_hint = {'x': 0.05}
-            self.size_hint_x = 0.7
+            self.size_hint_x = 0.75
         
-        layout = MDBoxLayout(orientation='vertical', spacing=dp(5))
+        layout = MDBoxLayout(
+            orientation='vertical',
+            adaptive_height=True,
+            spacing=dp(5),
+            size_hint_y=None
+        )
         
         msg_label = MDLabel(
             text=message,
             font_style='Body',
             role='large',
-            theme_text_color='Primary'
+            theme_text_color='Primary',
+            adaptive_height=True,  # ✅ Multi-line support
+            size_hint_y=None
         )
+        # Bind text size to label height for multi-line text
+        msg_label.bind(texture_size=msg_label.setter('size'))
         
         time_label = MDLabel(
             text=timestamp,
             font_style='Body',
             role='small',
             theme_text_color='Secondary',
-            halign='right'
+            halign='right',
+            size_hint_y=None,
+            height=dp(20)
         )
         
         layout.add_widget(msg_label)
         layout.add_widget(time_label)
+        layout.bind(size=self.setter('height'))  # Bind layout height to card height
+        
         self.add_widget(layout)
 
 
 class FileBubble(MDCard):
-    """Custom file bubble widget for file transfers."""
+    """Custom file bubble widget for file transfers with adaptive height."""
     
     def __init__(self, filename, filepath, timestamp, is_sent=False, **kwargs):
         super().__init__(**kwargs)
@@ -436,8 +489,9 @@ class FileBubble(MDCard):
         self.filepath = filepath
         
         self.style = 'elevated'
+        self.adaptive_height = True  # ✅ Adapt to content
         self.size_hint_y = None
-        self.height = dp(80)
+        self.minimum_height = dp(100)
         self.padding = dp(10)
         
         # Color coding: sent (blue) vs received (grey)
@@ -450,7 +504,12 @@ class FileBubble(MDCard):
             self.pos_hint = {'x': 0.05}
             self.size_hint_x = 0.75
         
-        main_layout = MDBoxLayout(orientation='vertical', spacing=dp(5))
+        main_layout = MDBoxLayout(
+            orientation='vertical',
+            adaptive_height=True,
+            spacing=dp(5),
+            size_hint_y=None
+        )
         
         # File info row
         file_row = MDBoxLayout(orientation='horizontal', spacing=dp(10), size_hint_y=None, height=dp(40))
@@ -514,6 +573,8 @@ class FileBubble(MDCard):
         
         main_layout.add_widget(file_row)
         main_layout.add_widget(button_row)
+        main_layout.bind(size=self.setter('height'))  # Bind layout height to card height
+        
         self.add_widget(main_layout)
     
     def _get_file_icon(self, filename):
@@ -557,7 +618,7 @@ class FileBubble(MDCard):
 
 
 class ChatScreen(MDScreen):
-    """Chat interface for messaging with a specific peer."""
+    """Chat interface for messaging with a specific peer with keyboard awareness."""
     
     peer_ip = StringProperty('')
     peer_name = StringProperty('Unknown')
@@ -566,6 +627,7 @@ class ChatScreen(MDScreen):
         super().__init__(**kwargs)
         self.name = 'chat'
         self.file_manager = None
+        self.keyboard_height = 0
         
         # Main layout
         layout = MDBoxLayout(orientation='vertical', spacing=dp(10))
@@ -593,52 +655,97 @@ class ChatScreen(MDScreen):
         header.add_widget(self.peer_label)
         layout.add_widget(header)
         
-        # Messages area
-        self.messages_scroll = MDScrollView(size_hint=(1, 1))
+        # Messages area with improved scrolling
+        self.messages_scroll = MDScrollView(
+            size_hint=(1, 1),
+            do_scroll_x=False,
+            bar_width=dp(10),
+            scroll_type=['bars', 'content']
+        )
         self.messages_list = MDBoxLayout(
             orientation='vertical',
             adaptive_height=True,
             spacing=dp(10),
-            padding=dp(10)
+            padding=dp(10),
+            size_hint_y=None
         )
+        self.messages_list.bind(minimum_height=self.messages_list.setter('height'))
         self.messages_scroll.add_widget(self.messages_list)
         layout.add_widget(self.messages_scroll)
         
-        # Input area
-        input_layout = MDBoxLayout(
-            size_hint_y=None,
-            height=dp(60),
+        # Input area with keyboard awareness
+        self.input_layout = MDBoxLayout(
+            orientation='horizontal',
+            adaptive_height=True,
+            minimum_height=dp(60),
             padding=dp(10),
-            spacing=dp(10)
+            spacing=dp(10),
+            size_hint_y=None,
+            pos_hint={'x': 0, 'bottom': 0}
         )
         
         # Attachment button
         attach_btn = MDIconButton(
             icon='paperclip',
             size_hint_x=None,
-            width=dp(40)
+            width=dp(48)
         )
         attach_btn.bind(on_release=self.open_file_picker)
         
         self.message_input = MDTextField(
             mode='outlined',
-            size_hint_x=0.7
+            size_hint_x=0.65,
+            size_hint_y=None,
+            height=dp(50)
         )
         self.message_input.add_widget(MDTextFieldHintText(text="Type a message..."))
         
         send_btn = MDButton(
             style='elevated',
-            size_hint_x=0.2
+            size_hint_x=0.25,
+            size_hint_y=None,
+            height=dp(50)
         )
         send_btn.add_widget(MDButtonText(text="Send"))
         send_btn.bind(on_release=self.send_message)
         
-        input_layout.add_widget(attach_btn)
-        input_layout.add_widget(self.message_input)
-        input_layout.add_widget(send_btn)
-        layout.add_widget(input_layout)
+        self.input_layout.add_widget(attach_btn)
+        self.input_layout.add_widget(self.message_input)
+        self.input_layout.add_widget(send_btn)
+        layout.add_widget(self.input_layout)
         
         self.add_widget(layout)
+        
+        # Bind keyboard events for Android
+        Window.bind(keyboard_height=self.on_keyboard_height)
+        Window.bind(on_keyboard=self.on_keyboard_event)
+    
+    def on_keyboard_height(self, instance, height):
+        """Handle keyboard height changes on Android."""
+        self.keyboard_height = height
+        
+        if height > 0:
+            # Keyboard is visible - scroll to bottom to show input
+            Clock.schedule_once(lambda dt: self._scroll_to_bottom(), 0.2)
+        else:
+            # Keyboard is hidden
+            pass
+    
+    def on_keyboard_event(self, instance, key, scancode, codepoint, modifier):
+        """Handle keyboard events."""
+        if scancode == 66:  # Enter key
+            # Only send if in message input
+            if self.message_input.focus:
+                self.send_message()
+                return True
+        return False
+    
+    def _scroll_to_bottom(self):
+        """Scroll messages to the bottom."""
+        try:
+            self.messages_scroll.scroll_y = 0
+        except Exception as e:
+            print(f"[ChatScreen] Error scrolling: {e}")
     
     def set_peer(self, peer_ip, peer_name):
         """Set the current chat peer and load history."""
@@ -721,10 +828,8 @@ class ChatScreen(MDScreen):
             # Clear input
             self.message_input.text = ''
             
-            # Scroll to bottom
-            Clock.schedule_once(lambda dt: setattr(
-                self.messages_scroll, 'scroll_y', 0
-            ), 0.1)
+            # Scroll to bottom after render
+            Clock.schedule_once(lambda dt: self._scroll_to_bottom(), 0.2)
     
     def add_received_message(self, sender_ip, message_text, timestamp):
         """Add a received message to the chat (called from main thread)."""
@@ -733,10 +838,8 @@ class ChatScreen(MDScreen):
             bubble = MessageBubble(message_text, timestamp, is_sent=False)
             self.messages_list.add_widget(bubble)
             
-            # Scroll to bottom
-            Clock.schedule_once(lambda dt: setattr(
-                self.messages_scroll, 'scroll_y', 0
-            ), 0.1)
+            # Scroll to bottom after render
+            Clock.schedule_once(lambda dt: self._scroll_to_bottom(), 0.2)
     
     def open_file_picker(self, *args):
         """Open file manager for file selection."""
@@ -819,10 +922,8 @@ class ChatScreen(MDScreen):
             bubble = FileBubble(filename, filepath, timestamp, is_sent=False)
             self.messages_list.add_widget(bubble)
             
-            # Scroll to bottom
-            Clock.schedule_once(lambda dt: setattr(
-                self.messages_scroll, 'scroll_y', 0
-            ), 0.1)
+            # Scroll to bottom after render
+            Clock.schedule_once(lambda dt: self._scroll_to_bottom(), 0.2)
     
     def go_back(self, *args):
         """Return to radar screen."""
@@ -1622,9 +1723,17 @@ class GhostNetApp(MDApp):
         )
     
     def update_radar_peers(self, peers_dict):
-        """Update radar screen with peer list (main thread)."""
-        radar_screen = self.root.get_screen('radar')
-        radar_screen.update_peers(peers_dict)
+        """Update radar screen with peer list and network status (main thread)."""
+        try:
+            radar_screen = self.root.get_screen('radar')
+            radar_screen.update_peers(peers_dict)
+            
+            # Also update network status
+            if self.engine:
+                network_status = self.engine.get_network_status()
+                radar_screen.update_network_status(network_status)
+        except Exception as e:
+            print(f"[GhostNetApp] Error updating radar: {e}")
     
     def handle_message_received(self, sender_ip, message_text, timestamp):
         """Handle incoming messages from network thread."""

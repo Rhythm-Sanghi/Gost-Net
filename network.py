@@ -4,6 +4,7 @@ Handles P2P discovery via UDP broadcast and secure TCP messaging.
 Supports binary file transfers with header-based protocol.
 Designed for offline-first, local network communication.
 Includes persistent encrypted storage integration.
+Features multi-interface detection and automatic network switching.
 """
 
 import socket
@@ -17,6 +18,14 @@ from cryptography.fernet import Fernet
 import hashlib
 import base64
 from pathlib import Path
+
+# Import network utilities for multi-interface detection
+try:
+    from network_utils import NetworkDetector, NetworkMonitor
+    NETWORK_UTILS_AVAILABLE = True
+except ImportError:
+    NETWORK_UTILS_AVAILABLE = False
+    print("[GhostEngine] Network utils not available - using legacy IP detection")
 
 # Import storage module (optional, fails gracefully if not available)
 try:
@@ -86,7 +95,16 @@ class GhostEngine:
             self.username = self.config_manager.get_username()
         else:
             self.username = "GhostUser"
+        
+        # Network detection with multi-interface support
+        self.network_detector = None
+        self.network_monitor = None
+        if NETWORK_UTILS_AVAILABLE:
+            self.network_detector = NetworkDetector()
+            self.network_monitor = NetworkMonitor(on_network_changed=self._on_network_changed)
+        
         self.local_ip = self._get_local_ip()
+        self.current_network_type = 'unknown'
         self.peers: Dict[str, dict] = {}  # {ip: {username, last_seen}}
         self.running = False
         
@@ -149,13 +167,24 @@ class GhostEngine:
         self.pruning_thread = None
     
     def _get_local_ip(self) -> str:
-        """Get the local IP address of this device."""
+        """Get the local IP address of this device with multi-interface support."""
         try:
-            # Create a dummy socket to determine local IP
+            # Use network detector if available
+            if self.network_detector:
+                best_ip = self.network_detector.get_best_interface()
+                if best_ip:
+                    # Detect network type
+                    self.current_network_type = self.network_detector.get_network_type(best_ip)
+                    print(f"[GhostEngine] Using {self.current_network_type} interface: {best_ip}")
+                    return best_ip
+            
+            # Fallback: Create a dummy socket to determine local IP
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
+            s.settimeout(2.0)
+            s.connect(("1.1.1.1", 80))  # Cloudflare DNS
             local_ip = s.getsockname()[0]
             s.close()
+            print(f"[GhostEngine] Using fallback IP: {local_ip}")
             return local_ip
         except Exception as e:
             print(f"[GhostEngine] Error getting local IP: {e}")
@@ -325,6 +354,16 @@ class GhostEngine:
             print("[GhostEngine] Pruning thread started")
         except Exception as e:
             print(f"[GhostEngine] Failed to start pruning thread: {e}")
+        
+        # Start network monitoring if available
+        if self.network_monitor:
+            try:
+                network_monitor_thread = threading.Thread(target=self._network_monitor_worker, daemon=True)
+                network_monitor_thread.start()
+                threads_started += 1
+                print("[GhostEngine] Network monitor thread started")
+            except Exception as e:
+                print(f"[GhostEngine] Failed to start network monitor thread: {e}")
         
         print(f"[GhostEngine] {threads_started} threads started successfully.")
         
@@ -802,6 +841,44 @@ class GhostEngine:
         # Run in background thread to avoid blocking
         threading.Thread(target=_send_file_worker, daemon=True).start()
         return True  # Return immediately
+    
+    def _network_monitor_worker(self):
+        """Monitor network changes and reconnect if needed."""
+        while self.running:
+            try:
+                time.sleep(5)  # Check every 5 seconds
+                
+                if self.network_monitor:
+                    # Check for network changes
+                    if self.network_monitor.check_network_change():
+                        print(f"[Network Monitor] Network changed, updating peers")
+                        # Trigger UI update with current peers
+                        if self.on_peer_update:
+                            self.on_peer_update(self.get_peers())
+            
+            except Exception as e:
+                if self.running:
+                    print(f"[Network Monitor] Error: {e}")
+    
+    def _on_network_changed(self, old_ip, new_ip, network_type):
+        """Callback when network changes."""
+        print(f"[GhostEngine] Network changed: {old_ip} → {new_ip} ({network_type})")
+        self.local_ip = new_ip
+        self.current_network_type = network_type
+    
+    def get_network_status(self) -> Dict[str, any]:
+        """Get current network status for UI display."""
+        if self.network_detector:
+            interfaces = self.network_detector.get_all_interfaces()
+        else:
+            interfaces = {}
+        
+        return {
+            'ip': self.local_ip,
+            'type': self.current_network_type,
+            'interfaces': interfaces,
+            'is_connected': self.local_ip != "127.0.0.1"
+        }
     
     def get_peers(self) -> Dict[str, dict]:
         """Get a copy of the current peers dictionary."""
