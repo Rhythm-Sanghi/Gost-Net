@@ -31,23 +31,29 @@ try:
     from kivymd.uix.slider import MDSlider
     
     # Create fallback classes for optional components
-    class _DummySpinner:
+    from kivy.uix.widget import Widget as KivyWidget
+    from kivy.uix.boxlayout import BoxLayout
+    
+    class _DummySpinner(KivyWidget):
         """Fallback spinner for KivyMD versions without MDSpinner."""
         def __init__(self, **kwargs):
+            super().__init__(**kwargs)
             self.size_hint = kwargs.get('size_hint', (None, None))
             self.size = kwargs.get('size', (46, 46))
             self.pos_hint = kwargs.get('pos_hint', {})
             self.active = kwargs.get('active', True)
     
-    class _DummyDialog:
+    class _DummyDialog(KivyWidget):
         """Fallback dialog for KivyMD versions without MDDialog."""
-        def __init__(self, *args, **kwargs): pass
+        def __init__(self, *args, **kwargs):
+            super().__init__(**kwargs)
         def open(self): pass
         def dismiss(self): pass
     
-    class _DummySwitch:
+    class _DummySwitch(KivyWidget):
         """Fallback switch for KivyMD versions without MDSwitch."""
         def __init__(self, **kwargs):
+            super().__init__(**kwargs)
             self.active = kwargs.get('active', False)
     
     # Import optional components with fallbacks
