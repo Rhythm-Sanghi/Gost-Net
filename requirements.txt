@@ -3,7 +3,10 @@
 
 # Core Framework
 kivy==2.3.0
-kivymd==1.1.1
+# KivyMD 2.0+ for Material Design 3 components
+kivymd==2.0.1.dev0
+# Required by KivyMD 2.0+ for Material You theming
+materialyoucolor
 
 # Cryptography
 cryptography>=41.0.0
