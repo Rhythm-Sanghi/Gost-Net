@@ -18,30 +18,42 @@ try:
     from kivymd.uix.card import MDCard
     from kivymd.uix.filemanager import MDFileManager
     from kivymd.uix.slider import MDSlider
+    from kivymd.uix.spinner import MDSpinner
+    
     # Try importing newer 2.0 API components, fallback to basic widgets if unavailable
     try:
         from kivymd.uix.button import MDButtonText
         from kivymd.uix.textfield import MDTextFieldHintText, MDTextFieldHelperText
-        from kivymd.uix.dialog import MDDialog, MDDialogHeadlineText, MDDialogContentContainer, MDDialogButtonContainer
-        from kivymd.uix.spinner import MDSpinner
     except ImportError:
         # Fallback for KivyMD 1.2.0 - use basic components
         MDButtonText = MDLabel
         MDTextFieldHintText = lambda text: None
         MDTextFieldHelperText = lambda text: None
-        MDDialog = None
+    
+    # Try Dialog imports separately
+    try:
+        from kivymd.uix.dialog import MDDialog, MDDialogHeadlineText, MDDialogContentContainer, MDDialogButtonContainer
+    except ImportError:
+        # Fallback - create dummy classes that don't crash
+        class MDDialog:
+            def __init__(self, *args, **kwargs): pass
+            def open(self): pass
+            def dismiss(self): pass
         MDDialogHeadlineText = MDLabel
         MDDialogContentContainer = MDBoxLayout
         MDDialogButtonContainer = MDBoxLayout
-        MDSpinner = None
     
     # MDSwitch - try both import styles
     try:
         from kivymd.uix.switch import MDSwitch
     except ImportError:
-        # Fallback: use a checkbox or basic button
-        from kivy.uix.widget import Widget
-        MDSwitch = Widget
+        # Fallback: create a dummy widget that doesn't crash
+        from kivy.uix.togglebutton import ToggleButton
+        class MDSwitch(ToggleButton):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+                self.background_normal = ''
+                self.background_down = ''
     
     KIVYMD_AVAILABLE = True
 except ImportError as e:
