@@ -682,14 +682,31 @@ class ChatScreen(MDScreen):
                 select_path=self.select_file
             )
         
-        # Start from user's home directory or storage
-        if platform.system() == 'Android':
-            # On Android, try to open external storage
-            start_path = '/storage/emulated/0/'
-        else:
-            start_path = os.path.expanduser("~")
+        # Start from user's home directory or storage - Bug #6 fix
+        start_path = os.path.expanduser("~")  # Default to home
         
-        self.file_manager.show(start_path)
+        if platform.system() == 'Android':
+            # On Android, try common storage paths with fallback
+            candidate_paths = [
+                '/storage/emulated/0/',
+                os.path.join(os.path.expanduser("~"), "Documents"),
+                os.path.join(os.path.expanduser("~"), "Downloads"),
+                os.path.expanduser("~"),
+            ]
+            
+            for path in candidate_paths:
+                if os.path.exists(path) and os.path.isdir(path):
+                    start_path = path
+                    break
+        
+        try:
+            self.file_manager.show(start_path)
+        except Exception as e:
+            print(f"[ChatScreen] File manager error: {e}, trying home directory")
+            try:
+                self.file_manager.show(os.path.expanduser("~"))
+            except Exception as e2:
+                print(f"[ChatScreen] File manager failed even with home dir: {e2}")
     
     def exit_file_manager(self, *args):
         """Close the file manager."""
@@ -1002,16 +1019,23 @@ class SettingsScreen(MDScreen):
         """Load current settings when entering the screen."""
         app = MDApp.get_running_app()
         
-        # Load username
-        self.username_field.text = app.config.get_username()
-        
-        # Load retention hours
-        retention_hours = app.config.get_retention_hours()
-        self.retention_slider.value = retention_hours
-        self.retention_label.text = f"Message Retention: {int(retention_hours)} hours"
-        
-        # Load dark mode
-        self.dark_mode_switch.active = app.config.is_dark_mode()
+        # Load username (with null check for Bug #9)
+        if app and app.config:
+            self.username_field.text = app.config.get_username()
+            
+            # Load retention hours
+            retention_hours = app.config.get_retention_hours()
+            self.retention_slider.value = retention_hours
+            self.retention_label.text = f"Message Retention: {int(retention_hours)} hours"
+            
+            # Load dark mode
+            self.dark_mode_switch.active = app.config.is_dark_mode()
+        else:
+            print("[SettingsScreen] Config not available, using defaults")
+            self.username_field.text = "GhostUser"
+            self.retention_slider.value = 24
+            self.retention_label.text = "Message Retention: 24 hours"
+            self.dark_mode_switch.active = True
     
     def update_username(self, *args):
         """Update the username in config."""
@@ -1022,8 +1046,11 @@ class SettingsScreen(MDScreen):
             return
         
         app = MDApp.get_running_app()
-        app.config.set_username(new_username)
-        print(f"[Settings] Username updated to '{new_username}'")
+        if app and app.config:
+            app.config.set_username(new_username)
+            print(f"[Settings] Username updated to '{new_username}'")
+        else:
+            print("[Settings] Config not available, cannot update username")
     
     def on_retention_changed(self, value):
         """Handle retention slider changes."""
@@ -1031,14 +1058,20 @@ class SettingsScreen(MDScreen):
         self.retention_label.text = f"Message Retention: {hours} hours"
         
         app = MDApp.get_running_app()
-        app.config.set_retention_hours(hours)
-        print(f"[Settings] Retention hours updated to {hours}")
+        if app and app.config:
+            app.config.set_retention_hours(hours)
+            print(f"[Settings] Retention hours updated to {hours}")
+        else:
+            print("[Settings] Config not available, cannot update retention")
     
     def on_dark_mode_changed(self, switch, value):
         """Handle dark mode toggle."""
         app = MDApp.get_running_app()
-        app.config.set_dark_mode(value)
-        print(f"[Settings] Dark mode {'enabled' if value else 'disabled'}")
+        if app and app.config:
+            app.config.set_dark_mode(value)
+            print(f"[Settings] Dark mode {'enabled' if value else 'disabled'}")
+        else:
+            print("[Settings] Config not available, cannot update dark mode")
     
     def show_about_dialog(self, *args):
         """Show about dialog with app information."""
@@ -1247,14 +1280,29 @@ class GhostNetApp(MDApp):
     
     def on_start(self):
         """Called when the app starts - now with async boot sequence."""
-        # Create required directories (only user-writable ones)
+        # Create required directories (only user-writable ones) - Bug #2 fix
+        self.downloads_path = None
         try:
-            # Only create downloads directory (not assets, which is in APK)
+            # Try primary path first: ~/Downloads/GhostNet
             downloads_path = os.path.join(os.path.expanduser("~"), "Downloads", "GhostNet")
             os.makedirs(downloads_path, exist_ok=True)
+            self.downloads_path = downloads_path
             print(f"[GhostNet] Downloads directory: {downloads_path}")
         except Exception as e:
-            print(f"[GhostNet] Warning: Could not create downloads directory: {e}")
+            print(f"[GhostNet] Primary downloads path failed: {e}")
+            # Fallback to app-specific directory
+            try:
+                import platform
+                if platform.system() == 'Android':
+                    downloads_path = os.path.join(os.path.expanduser("~"), ".ghostnet", "downloads")
+                else:
+                    downloads_path = os.path.join(os.path.expanduser("~"), ".ghostnet", "downloads")
+                os.makedirs(downloads_path, exist_ok=True)
+                self.downloads_path = downloads_path
+                print(f"[GhostNet] Using fallback downloads directory: {downloads_path}")
+            except Exception as e2:
+                print(f"[GhostNet] WARNING: Could not create downloads directory: {e2}")
+                # Continue without downloads directory - app can still function
         
         # Start on boot screen
         try:
@@ -1282,9 +1330,14 @@ class GhostNetApp(MDApp):
         
         try:
             # Step 1: Request permissions (move to UI thread to avoid threading issues)
+            # Bug #5 fix: Store boot_screen in self to avoid scope issues
             def request_perms_ui():
-                boot_screen.update_status("Requesting permissions...")
-                self.request_permissions()
+                try:
+                    if self.root and self.root.get_screen('boot'):
+                        self.root.get_screen('boot').update_status("Requesting permissions...")
+                    self.request_permissions()
+                except Exception as e:
+                    print(f"[GhostNet] Permission request error: {e}")
             
             Clock.schedule_once(lambda dt: request_perms_ui(), 0)
             time.sleep(0.5)
@@ -1323,8 +1376,12 @@ class GhostNetApp(MDApp):
             
             Clock.schedule_once(lambda dt: register_config_callback(), 0.5)
             
-            # Get username from config
-            self.username = self.config.get_username()
+            # Get username from config (with null check)
+            if self.config:
+                self.username = self.config.get_username()
+            else:
+                print("[GhostNet] Config unavailable, using default username")
+                self.username = "GhostUser"
             time.sleep(0.5)
             
             # Step 3: Initialize database
@@ -1363,7 +1420,8 @@ class GhostNetApp(MDApp):
                 0
             )
             
-            if self.config.is_auto_cleanup_enabled():
+            # Check if config is available before using it (Bug #11)
+            if self.config and self.config.is_auto_cleanup_enabled():
                 retention_hours = self.config.get_retention_hours()
                 self.cleanup_old_messages(hours=retention_hours)
             time.sleep(0.5)

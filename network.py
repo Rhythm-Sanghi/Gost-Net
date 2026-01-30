@@ -95,9 +95,31 @@ class GhostEngine:
         self.on_peer_update = on_peer_update
         self.on_file_received = on_file_received
         
-        # File handling
-        self.downloads_dir = downloads_dir or os.path.join(os.getcwd(), "downloads")
-        os.makedirs(self.downloads_dir, exist_ok=True)
+        # File handling - Bug #2 fix with error handling and fallback
+        if downloads_dir:
+            self.downloads_dir = downloads_dir
+        else:
+            # Try primary path first, with fallback
+            try:
+                import platform
+                if platform.system() == 'Android':
+                    # On Android, use app-specific storage
+                    self.downloads_dir = os.path.join(os.path.expanduser("~"), ".ghostnet", "downloads")
+                else:
+                    # On desktop, use ~/Downloads/GhostNet
+                    self.downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads", "GhostNet")
+                os.makedirs(self.downloads_dir, exist_ok=True)
+            except Exception as e:
+                print(f"[GhostEngine] Primary downloads path failed: {e}")
+                # Fallback to current directory
+                try:
+                    self.downloads_dir = os.path.join(os.getcwd(), ".ghostnet_downloads")
+                    os.makedirs(self.downloads_dir, exist_ok=True)
+                    print(f"[GhostEngine] Using fallback downloads directory: {self.downloads_dir}")
+                except Exception as e2:
+                    print(f"[GhostEngine] WARNING: Could not create downloads directory: {e2}")
+                    # Continue without creating directory - app can still function
+                    self.downloads_dir = os.getcwd()
         
         # Database storage
         self.db_manager = None
@@ -162,11 +184,17 @@ class GhostEngine:
             return Fernet(key_b64)
         except Exception as e:
             print(f"[GhostEngine] Cipher generation error: {e}")
-            # Fallback to a static key (insecure, for development only)
-            return Fernet(Fernet.generate_key())
+            # Bug #10 fix: Don't generate new key on error, return None instead
+            # Returning a new key breaks decryption of existing messages
+            print("[GhostEngine] WARNING: Cipher unavailable, message encryption disabled")
+            return None
     
     def _encrypt_message(self, message: str) -> bytes:
         """Encrypt a message string."""
+        if self.cipher is None:
+            print("[GhostEngine] WARNING: Cipher not available, storing unencrypted")
+            return message.encode('utf-8')
+        
         try:
             return self.cipher.encrypt(message.encode('utf-8'))
         except Exception as e:
@@ -175,6 +203,10 @@ class GhostEngine:
     
     def _decrypt_message(self, encrypted: bytes) -> str:
         """Decrypt a message."""
+        if self.cipher is None:
+            print("[GhostEngine] WARNING: Cipher not available, returning unencrypted")
+            return encrypted.decode('utf-8', errors='ignore')
+        
         try:
             return self.cipher.decrypt(encrypted).decode('utf-8')
         except Exception as e:
@@ -595,19 +627,31 @@ class GhostEngine:
     
     def _sanitize_filename(self, filename: str) -> str:
         """Sanitize filename to prevent path traversal attacks."""
+        # Store original filename for extension extraction
+        original_filename = filename
+        
         # Remove path separators
         filename = os.path.basename(filename)
         
-        # Remove potentially dangerous characters
-        safe_chars = "-_.() abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-        filename = ''.join(c for c in filename if c in safe_chars or c.isalnum())
+        # Bug #8 fix: Preserve common file extensions and special characters
+        # Allow more characters to prevent data loss from overly aggressive sanitization
+        dangerous_chars = '<>:"|?*\\'  # Only remove truly dangerous characters
+        sanitized = filename
+        for char in dangerous_chars:
+            sanitized = sanitized.replace(char, '_')
         
-        # Limit length
-        if len(filename) > 255:
-            name, ext = os.path.splitext(filename)
-            filename = name[:250] + ext
+        # Limit length (preserve extension)
+        if len(sanitized) > 255:
+            name, ext = os.path.splitext(sanitized)
+            sanitized = name[:250 - len(ext)] + ext
         
-        return filename or "unnamed_file"
+        # If filename is empty after sanitization, use timestamp-based fallback
+        if not sanitized or sanitized.strip() == '':
+            # Extract extension from original filename if possible
+            _, ext = os.path.splitext(os.path.basename(original_filename))
+            return f"file_{int(time.time())}{ext}"
+        
+        return sanitized
     
     def _calculate_checksum(self, filepath: str) -> str:
         """Calculate SHA256 checksum of a file."""

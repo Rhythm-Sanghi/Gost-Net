@@ -43,10 +43,14 @@ class ConfigManager:
         # Use platform-aware paths
         import platform
         if platform.system() == 'Android':
-            from kivy.core.window import Window
-            # On Android, use app-specific storage
-            config_path = os.path.join(os.path.expanduser("~"), ".ghostnet", config_path)
-            os.makedirs(os.path.dirname(config_path), exist_ok=True)
+            # On Android, use app-specific storage (don't import kivy.core.window here)
+            try:
+                config_path = os.path.join(os.path.expanduser("~"), ".ghostnet", config_path)
+                os.makedirs(os.path.dirname(config_path), exist_ok=True)
+            except Exception as e:
+                print(f"[ConfigManager] WARNING: Could not create config directory: {e}")
+                # Fallback to current directory
+                config_path = "settings.json"
         
         self.config_path = config_path
         self.config: Dict[str, Any] = {}

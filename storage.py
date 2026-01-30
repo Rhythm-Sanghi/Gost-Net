@@ -109,6 +109,10 @@ class DatabaseManager:
     
     def _encrypt_content(self, content: str) -> bytes:
         """Encrypt message content."""
+        if self.cipher is None:
+            print("[DatabaseManager] WARNING: Cipher not available, storing unencrypted")
+            return content.encode('utf-8')
+        
         try:
             return self.cipher.encrypt(content.encode('utf-8'))
         except Exception as e:
@@ -117,6 +121,10 @@ class DatabaseManager:
     
     def _decrypt_content(self, encrypted: bytes) -> str:
         """Decrypt message content."""
+        if self.cipher is None:
+            print("[DatabaseManager] WARNING: Cipher not available, returning unencrypted")
+            return encrypted.decode('utf-8', errors='ignore')
+        
         try:
             return self.cipher.decrypt(encrypted).decode('utf-8')
         except Exception as e:
@@ -186,9 +194,10 @@ class DatabaseManager:
         if last_seen is None:
             last_seen = time.time()
         
+        conn = None
         with self.db_lock:
             try:
-                conn = sqlite3.connect(self.db_path)
+                conn = sqlite3.connect(self.db_path, timeout=10.0)
                 cursor = conn.cursor()
                 
                 cursor.execute('''
@@ -197,12 +206,17 @@ class DatabaseManager:
                 ''', (ip_address, username, last_seen))
                 
                 conn.commit()
-                conn.close()
                 
                 # print(f"[DatabaseManager] Saved peer: {username} @ {ip_address}")
                 
             except Exception as e:
                 print(f"[DatabaseManager] Error saving peer: {e}")
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
     
     def get_peer_username(self, ip_address: str) -> Optional[str]:
         """
@@ -214,9 +228,10 @@ class DatabaseManager:
         Returns:
             Username or None if not found
         """
+        conn = None
         with self.db_lock:
             try:
-                conn = sqlite3.connect(self.db_path)
+                conn = sqlite3.connect(self.db_path, timeout=10.0)
                 cursor = conn.cursor()
                 
                 cursor.execute('''
@@ -224,15 +239,19 @@ class DatabaseManager:
                 ''', (ip_address,))
                 
                 result = cursor.fetchone()
-                conn.close()
-                
                 return result[0] if result else None
                 
             except Exception as e:
                 print(f"[DatabaseManager] Error getting peer username: {e}")
                 return None
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
     
-    def save_message(self, peer_ip: str, sender: str, content: str, 
+    def save_message(self, peer_ip: str, sender: str, content: str,
                      message_type: str, file_path: Optional[str] = None,
                      timestamp: Optional[float] = None):
         """
@@ -249,9 +268,10 @@ class DatabaseManager:
         if timestamp is None:
             timestamp = time.time()
         
+        conn = None
         with self.db_lock:
             try:
-                conn = sqlite3.connect(self.db_path)
+                conn = sqlite3.connect(self.db_path, timeout=10.0)
                 cursor = conn.cursor()
                 
                 # Encrypt content
@@ -263,12 +283,17 @@ class DatabaseManager:
                 ''', (peer_ip, sender, encrypted_content, message_type, timestamp, file_path))
                 
                 conn.commit()
-                conn.close()
                 
                 # print(f"[DatabaseManager] Saved message: {message_type} from {sender}")
                 
             except Exception as e:
                 print(f"[DatabaseManager] Error saving message: {e}")
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
     
     def get_history(self, peer_ip: str, limit: int = 100) -> List[Dict]:
         """
@@ -282,9 +307,10 @@ class DatabaseManager:
             List of message dictionaries with keys:
             - id, sender, content, message_type, timestamp, file_path
         """
+        conn = None
         with self.db_lock:
             try:
-                conn = sqlite3.connect(self.db_path)
+                conn = sqlite3.connect(self.db_path, timeout=10.0)
                 cursor = conn.cursor()
                 
                 cursor.execute('''
@@ -296,7 +322,6 @@ class DatabaseManager:
                 ''', (peer_ip, limit))
                 
                 rows = cursor.fetchall()
-                conn.close()
                 
                 # Decrypt and format messages
                 messages = []
@@ -323,6 +348,12 @@ class DatabaseManager:
             except Exception as e:
                 print(f"[DatabaseManager] Error getting history: {e}")
                 return []
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
     
     def get_all_peers(self) -> List[Dict]:
         """
@@ -331,9 +362,10 @@ class DatabaseManager:
         Returns:
             List of peer dictionaries with keys: ip_address, username, last_seen
         """
+        conn = None
         with self.db_lock:
             try:
-                conn = sqlite3.connect(self.db_path)
+                conn = sqlite3.connect(self.db_path, timeout=10.0)
                 cursor = conn.cursor()
                 
                 cursor.execute('''
@@ -343,7 +375,6 @@ class DatabaseManager:
                 ''')
                 
                 rows = cursor.fetchall()
-                conn.close()
                 
                 peers = []
                 for row in rows:
@@ -358,6 +389,12 @@ class DatabaseManager:
             except Exception as e:
                 print(f"[DatabaseManager] Error getting peers: {e}")
                 return []
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
     
     def cleanup_old_messages(self, hours: int = 24) -> int:
         """
@@ -371,9 +408,10 @@ class DatabaseManager:
         """
         cutoff_time = time.time() - (hours * 3600)
         
+        conn = None
         with self.db_lock:
             try:
-                conn = sqlite3.connect(self.db_path)
+                conn = sqlite3.connect(self.db_path, timeout=10.0)
                 cursor = conn.cursor()
                 
                 # Get count before deletion
@@ -388,7 +426,6 @@ class DatabaseManager:
                 ''', (cutoff_time,))
                 
                 conn.commit()
-                conn.close()
                 
                 print(f"[DatabaseManager] Cleaned up {count} messages older than {hours} hours")
                 return count
@@ -396,6 +433,12 @@ class DatabaseManager:
             except Exception as e:
                 print(f"[DatabaseManager] Error cleaning up messages: {e}")
                 return 0
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
     
     def delete_peer_history(self, peer_ip: str) -> int:
         """
@@ -407,9 +450,10 @@ class DatabaseManager:
         Returns:
             Number of messages deleted
         """
+        conn = None
         with self.db_lock:
             try:
-                conn = sqlite3.connect(self.db_path)
+                conn = sqlite3.connect(self.db_path, timeout=10.0)
                 cursor = conn.cursor()
                 
                 cursor.execute('''
@@ -418,7 +462,6 @@ class DatabaseManager:
                 
                 deleted = cursor.rowcount
                 conn.commit()
-                conn.close()
                 
                 print(f"[DatabaseManager] Deleted {deleted} messages with {peer_ip}")
                 return deleted
@@ -426,6 +469,12 @@ class DatabaseManager:
             except Exception as e:
                 print(f"[DatabaseManager] Error deleting peer history: {e}")
                 return 0
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
     
     def get_statistics(self) -> Dict:
         """
@@ -434,9 +483,10 @@ class DatabaseManager:
         Returns:
             Dictionary with: total_messages, total_peers, oldest_message, newest_message
         """
+        conn = None
         with self.db_lock:
             try:
-                conn = sqlite3.connect(self.db_path)
+                conn = sqlite3.connect(self.db_path, timeout=10.0)
                 cursor = conn.cursor()
                 
                 # Count messages
@@ -450,8 +500,6 @@ class DatabaseManager:
                 # Get timestamp range
                 cursor.execute('SELECT MIN(timestamp), MAX(timestamp) FROM messages')
                 oldest, newest = cursor.fetchone()
-                
-                conn.close()
                 
                 return {
                     'total_messages': total_messages,
@@ -468,6 +516,12 @@ class DatabaseManager:
                     'oldest_message': None,
                     'newest_message': None
                 }
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
     
     def export_chat(self, peer_ip: str, output_path: str) -> bool:
         """
@@ -513,14 +567,20 @@ class DatabaseManager:
     
     def vacuum_database(self):
         """Optimize database by reclaiming unused space."""
+        conn = None
         with self.db_lock:
             try:
-                conn = sqlite3.connect(self.db_path)
+                conn = sqlite3.connect(self.db_path, timeout=10.0)
                 conn.execute('VACUUM')
-                conn.close()
                 print("[DatabaseManager] Database vacuumed successfully")
             except Exception as e:
                 print(f"[DatabaseManager] Error vacuuming database: {e}")
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
     
     def close(self):
         """Clean up database resources."""
