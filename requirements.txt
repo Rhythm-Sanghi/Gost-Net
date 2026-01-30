@@ -3,9 +3,9 @@
 
 # Core Framework
 kivy==2.3.0
-# KivyMD 2.0+ for Material Design 3 components
-kivymd==2.0.1.dev0
-# Required by KivyMD 2.0+ for Material You theming
+# Latest stable KivyMD (master branch used in buildozer for 2.0 API support)
+kivymd==1.2.0
+# Required by KivyMD for Material Design theming
 materialyoucolor
 
 # Cryptography

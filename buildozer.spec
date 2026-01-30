@@ -20,8 +20,8 @@ version = 1.0.0
 
 # (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy
-# KivyMD 2.0+ requires materialyoucolor for Material Design 3 theming
-requirements = python3,kivy==2.3.0,kivymd==2.0.1.dev0,materialyoucolor,pillow,cryptography==41.0.7,openssl,libffi
+# Note: KivyMD from master branch supports 2.0 API used in this app
+requirements = python3,kivy==2.3.0,kivymd,materialyoucolor,pillow,cryptography==41.0.7,openssl,libffi
 
 # (str) Custom source folders for requirements
 # Sets custom source for any requirements with recipes
