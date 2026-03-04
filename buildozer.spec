@@ -80,8 +80,9 @@ android.presplash_color = #121212
 #icon.adaptive_background.filename = %(source.dir)s/data/icon_bg.png
 
 # (list) Permissions
-# CRITICAL: These permissions are required for local network discovery, messaging, and file transfers
-android.permissions = INTERNET,ACCESS_NETWORK_STATE,ACCESS_WIFI_STATE,CHANGE_WIFI_MULTICAST_STATE,CHANGE_NETWORK_STATE,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,WAKE_LOCK
+# CRITICAL: These permissions are required for local network discovery, messaging, file transfers,
+# Wi-Fi Direct (API 33+), and Bluetooth (API 31+). Runtime permissions required for API 33+.
+android.permissions = INTERNET,ACCESS_NETWORK_STATE,ACCESS_WIFI_STATE,CHANGE_WIFI_MULTICAST_STATE,CHANGE_NETWORK_STATE,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,WAKE_LOCK,NEARBY_WIFI_DEVICES,BLUETOOTH,BLUETOOTH_ADMIN,BLUETOOTH_SCAN,BLUETOOTH_CONNECT,ACCESS_FINE_LOCATION,ACCESS_COARSE_LOCATION,CHANGE_WIFI_STATE,LOCAL_MAC_ADDRESS
 
 # (int) Target Android API, should be as high as possible.
 android.api = 33

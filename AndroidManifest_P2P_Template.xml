@@ -1,0 +1,344 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+Ghost Net - Android Manifest Configuration
+API 33+ Compliance with Wi-Fi Direct and Bluetooth Support
+
+This manifest template provides:
+- Permissions for Wi-Fi Direct (android.net.wifi.p2p package, API 33+)
+- Permissions for Bluetooth RFCOMM (android.bluetooth package, API 31+)
+- Location permissions required for P2P discovery
+- BroadcastReceiver declarations for system events
+- Service declarations for background P2P operations
+- Proper intent-filter configurations
+
+Build Integration:
+This file should be placed at: .buildozer/android/app/src/main/AndroidManifest.xml
+Or configured in buildozer.spec via: android.manifest_custom_template = path/to/AndroidManifestCustom.xml
+-->
+
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="org.ghostnet.app"
+    android:versionCode="1"
+    android:versionName="1.0.0">
+
+    <!-- iOS-style app identifier (for future cross-platform support) -->
+    <uses-sdk
+        android:minSdkVersion="21"
+        android:targetSdkVersion="33" />
+
+    <!-- ============================================================================
+         SECTION 1: Wi-Fi Direct Permissions (API 33+ Runtime)
+         ============================================================================
+         Note: These permissions require runtime requests on API 33+
+    -->
+
+    <!-- Wi-Fi Direct peer discovery (API 33+, runtime permission) -->
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
+
+    <!-- Wi-Fi Direct control and state changes -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+
+    <!-- Local MAC address query for P2P device identification (API 33+) -->
+    <uses-permission android:name="android.permission.LOCAL_MAC_ADDRESS" />
+
+    <!-- ============================================================================
+         SECTION 2: Bluetooth Permissions (API 31+ Runtime)
+         ============================================================================
+         Note: BLUETOOTH_SCAN and BLUETOOTH_CONNECT require runtime requests on API 31+
+    -->
+
+    <!-- Bluetooth device discovery (API 31+, runtime permission) -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+
+    <!-- Bluetooth RFCOMM socket connections (API 31+, runtime permission) -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!-- Legacy Bluetooth for API 30 and earlier -->
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+
+    <!-- Bluetooth device pairing and bonding -->
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+
+    <!-- ============================================================================
+         SECTION 3: Location Permissions (Required for Wi-Fi Direct and Bluetooth)
+         ============================================================================
+         Note: Precise location required for P2P on most Android versions
+    -->
+
+    <!-- Fine location (GPS, better accuracy) - runtime permission -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+    <!-- Coarse location (network-based) - fallback -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- ============================================================================
+         SECTION 4: Network and Communication Permissions
+         ============================================================================
+    -->
+
+    <!-- Standard internet access -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+
+    <!-- Multicast for UDP discovery broadcast -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+
+    <!-- ============================================================================
+         SECTION 5: File Storage Permissions
+         ============================================================================
+    -->
+
+    <!-- Read external files for file transfer -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+
+    <!-- Write received files to storage -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+
+    <!-- ============================================================================
+         SECTION 6: Device Power Management
+         ============================================================================
+    -->
+
+    <!-- Keep device awake for P2P connections -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- ============================================================================
+         SECTION 7: Feature Declarations (Optional but Recommended)
+         ============================================================================
+         Note: required="false" means app can work without these features
+    -->
+
+    <!-- Wi-Fi Direct support (not required on all devices) -->
+    <uses-feature
+        android:name="android.hardware.wifi.direct"
+        android:required="false" />
+
+    <!-- Bluetooth support (not required on all devices) -->
+    <uses-feature
+        android:name="android.hardware.bluetooth"
+        android:required="false" />
+
+    <!-- Location support -->
+    <uses-feature
+        android:name="android.hardware.location"
+        android:required="false" />
+
+    <!-- ============================================================================
+         SECTION 8: Application Definition
+         ============================================================================
+    -->
+
+    <application
+        android:allowBackup="true"
+        android:debuggable="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:theme="@style/AppTheme"
+        android:usesCleartextTraffic="true">
+
+        <!-- Main Activity -->
+        <activity
+            android:name="org.kivy.android.PythonActivity"
+            android:alwaysRetainTaskState="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="portrait"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize">
+
+            <!-- Application startup intent filter -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+        </activity>
+
+        <!-- ====================================================================
+             SECTION 9: BroadcastReceiver Declarations
+             ====================================================================
+             These receivers listen for system events related to P2P connectivity.
+             Note: For API 31+, intent filters must be declared explicitly.
+        -->
+
+        <!-- Wi-Fi Direct State Receiver (API 14+) -->
+        <receiver
+            android:name="android.net.wifi.p2p.WifiP2pManager$ActionListener"
+            android:enabled="true"
+            android:exported="true">
+
+            <!-- Wi-Fi P2P state changed (enabled/disabled) -->
+            <intent-filter>
+                <action android:name="android.net.wifi.p2p.STATE_CHANGED" />
+            </intent-filter>
+
+            <!-- Peer list updated (discovery results) -->
+            <intent-filter>
+                <action android:name="android.net.wifi.p2p.PEERS_CHANGED" />
+            </intent-filter>
+
+            <!-- Connection state changed (group formed/closed) -->
+            <intent-filter>
+                <action android:name="android.net.wifi.p2p.CONNECTION_STATE_CHANGE" />
+            </intent-filter>
+
+            <!-- This device's Wi-Fi P2P info changed -->
+            <intent-filter>
+                <action android:name="android.net.wifi.p2p.THIS_DEVICE_CHANGED" />
+            </intent-filter>
+
+        </receiver>
+
+        <!-- Bluetooth Discovery Receiver (API 5+) -->
+        <receiver
+            android:name="android.bluetooth.BluetoothDevice"
+            android:enabled="true"
+            android:exported="true">
+
+            <!-- Discovery started -->
+            <intent-filter>
+                <action android:name="android.bluetooth.adapter.action.DISCOVERY_STARTED" />
+            </intent-filter>
+
+            <!-- Discovery finished -->
+            <intent-filter>
+                <action android:name="android.bluetooth.adapter.action.DISCOVERY_FINISHED" />
+            </intent-filter>
+
+            <!-- Device found during discovery -->
+            <intent-filter>
+                <action android:name="android.bluetooth.device.action.FOUND" />
+            </intent-filter>
+
+            <!-- Bluetooth bond state changed (pairing) -->
+            <intent-filter>
+                <action android:name="android.bluetooth.device.action.BOND_STATE_CHANGED" />
+            </intent-filter>
+
+            <!-- Pairing request from remote device -->
+            <intent-filter>
+                <action android:name="android.bluetooth.device.action.PAIRING_REQUEST" />
+            </intent-filter>
+
+        </receiver>
+
+        <!-- Bluetooth Adapter State Receiver (API 5+) -->
+        <receiver
+            android:name="android.bluetooth.BluetoothAdapter"
+            android:enabled="true"
+            android:exported="true">
+
+            <!-- Bluetooth adapter state changed (on/off) -->
+            <intent-filter>
+                <action android:name="android.bluetooth.adapter.action.STATE_CHANGED" />
+            </intent-filter>
+
+        </receiver>
+
+        <!-- ====================================================================
+             SECTION 10: Service Declarations (Optional)
+             ====================================================================
+             For background P2P operations, declare services here.
+             Example: Background file transfer service
+        -->
+
+        <!-- Ghost Net P2P Service for background operations -->
+        <!-- Uncomment if implementing background P2P service
+        <service
+            android:name="org.ghostnet.service.P2PService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync">
+        </service>
+        -->
+
+        <!-- ====================================================================
+             SECTION 11: Provider Declarations (Optional)
+             ====================================================================
+             For content sharing via file provider (for received files)
+        -->
+
+        <!-- File provider for secure file sharing -->
+        <!-- Uncomment if implementing file sharing
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="org.ghostnet.provider"
+            android:enabled="true"
+            android:exported="false">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+        -->
+
+    </application>
+
+</manifest>
+
+<!--
+IMPLEMENTATION NOTES:
+
+1. RUNTIME PERMISSIONS (API 33+):
+   While these permissions are declared in the manifest, you MUST request them
+   at runtime using the android_permissions.py module:
+   
+   - NEARBY_WIFI_DEVICES (API 33+)
+   - BLUETOOTH_SCAN (API 31+)
+   - BLUETOOTH_CONNECT (API 31+)
+   - ACCESS_FINE_LOCATION (API 6+)
+   
+   Example usage:
+   ```python
+   perm_manager = PermissionManager()
+   perm_manager.request_wifi_direct_permissions()
+   perm_manager.request_bluetooth_permissions()
+   ```
+
+2. BroadcastReceiver Integration:
+   The actual receiver implementations are in:
+   - android_wifi_direct.py: WiFiDirectBroadcastReceiver
+   - android_bluetooth.py: BluetoothBroadcastReceiver
+   
+   Register these receivers in your Python code using Context.registerReceiver()
+
+3. Foreground Service (API 31+):
+   If implementing long-running P2P operations, consider using a ForegroundService:
+   - Requires FOREGROUND_SERVICE permission
+   - Must call startForeground() with NotificationCompat.Builder
+   - See P2PService implementation for details
+
+4. Multicast Limitations:
+   - CHANGE_WIFI_MULTICAST_STATE requires active WifiLock
+   - UDP broadcast may fail on some networks
+   - Falls back to unicast peer discovery if needed
+
+5. File Access:
+   - Use context.getExternalFilesDir() for app-specific storage (API 4+)
+   - Use context.getFilesDir() for internal app storage
+   - Request MANAGE_EXTERNAL_STORAGE on API 30+ if accessing all files
+
+6. Build Integration:
+   To use this manifest template:
+   
+   Option A - Custom Template:
+   1. Copy this file to: android/AndroidManifestCustom.xml
+   2. In buildozer.spec add:
+      android.manifest_custom_template = android/AndroidManifestCustom.xml
+   
+   Option B - Direct Edit:
+   1. Place in: .buildozer/android/app/src/main/AndroidManifest.xml
+   2. Re-build with: buildozer android debug
+   
+   Option C - Gradle Configuration:
+   Use android/build.gradle to inject manifest entries programmatically
+
+7. Testing Checklist:
+   [ ] Run on Android API 33+ device
+   [ ] Test permission request dialogs
+   [ ] Verify WiFiDirectBroadcastReceiver receives events
+   [ ] Verify BluetoothBroadcastReceiver receives events
+   [ ] Test Wi-Fi Direct peer discovery
+   [ ] Test Bluetooth device discovery
+   [ ] Test file transfers over both P2P channels
+   [ ] Verify proper cleanup on app exit
+-->
