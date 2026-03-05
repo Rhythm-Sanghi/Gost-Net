@@ -294,6 +294,10 @@ p4a.branch = master
 # (int) LOG_LEVEL, should be one of TRACE, DEBUG, INFO, WARN, ERROR, CRITICAL (default INFO)
 #p4a.log_level = INFO
 
+# (str) Cython compiler directives for Python 3 compatibility
+# Explicitly set language_level to 3 to fix Cython warnings and Python 2 incompatibility
+p4a.cython_directives = {"language_level": "3"}
+
 # (str) Bootstrap to use for android builds
 # p4a.bootstrap = sdl2
 

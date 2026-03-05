@@ -14,6 +14,13 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Initialize git repository for build metadata
+      run: |
+        git config --global user.email "build@ghostnet.local"
+        git config --global user.name "Ghost Net Builder"
       
     - name: Set up Python 3.10
       uses: actions/setup-python@v5
@@ -70,6 +77,21 @@ jobs:
         pip install --upgrade cython==0.29.36
         pip install --upgrade buildozer
         pip install -r requirements.txt
+        
+    - name: Configure Cython for Python 3 compatibility
+      run: |
+        mkdir -p ~/.cython
+        cat > ~/.cython/cythonrc << 'EOF'
+        [build_ext]
+        compiler_directives = {"language_level": "3"}
+        EOF
+        
+    - name: Configure python-for-android for Cython Python 3
+      run: |
+        mkdir -p ~/.buildozer/android/platform/build-tools
+        cat > ~/.buildozer/cython_directives.txt << 'EOF'
+        language_level=3
+        EOF
         
     - name: Generate app assets
       run: |
