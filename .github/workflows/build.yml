@@ -24,12 +24,15 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y \
+          build-essential \
           git \
           zip \
           unzip \
           openjdk-17-jdk \
           autoconf \
           libtool \
+          libtool-bin \
+          libltdl-dev \
           pkg-config \
           zlib1g-dev \
           libncurses5-dev \
@@ -38,8 +41,14 @@ jobs:
           cmake \
           libffi-dev \
           libssl-dev \
+          python3-dev \
           python3-pip
           
+    - name: Install Rust toolchain for Android cross-compilation
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+        
     - name: Set Java options (prevent OOM errors)
       run: |
         echo "_JAVA_OPTIONS=-Xms512m -Xmx2048m" >> $GITHUB_ENV

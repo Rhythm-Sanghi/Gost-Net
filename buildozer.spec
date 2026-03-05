@@ -21,7 +21,9 @@ version = 1.0.0
 # (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy
 # KivyMD 2.0.1 requires asynckivy (which requires asyncgui) for async support in Material Design 3
-requirements = python3,kivy==2.3.0,kivymd==1.2.0,asynckivy,asyncgui,pillow,cryptography==41.0.7,openssl,libffi
+# hostpython3 explicitly included for Buildozer to use most stable python3-for-android recipe
+# cryptography relaxed (no strict version lock) to allow p4a to use its optimized recipe
+requirements = hostpython3,python3,kivy==2.3.0,kivymd==1.2.0,asynckivy,asyncgui,pillow,cryptography,openssl,libffi
 
 # (str) Custom source folders for requirements
 # Sets custom source for any requirements with recipes
