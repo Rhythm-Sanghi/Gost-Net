@@ -15,6 +15,11 @@ source.dir = .
 # (list) Source files to include (let empty to include all the files)
 source.include_exts = py,png,jpg,kv,atlas
 
+# (list) Source files/dirs to exclude (e.g., unused test directories from build)
+# This prevents compileall errors from Python stdlib test files during Buildozer compilation
+source.exclude_dirs = tests,test,mockups,.git,.github,.vscode,.idea,__pycache__,*.egg-info,build,dist
+source.exclude_patterns = *.orig,*.pyc,*.pyo,*~,*.swp,.DS_Store,*badsyntax*.py,test_*.py
+
 # (str) Application versioning (method 1)
 version = 1.0.0
 

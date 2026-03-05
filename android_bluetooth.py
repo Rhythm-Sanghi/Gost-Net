@@ -112,7 +112,7 @@ class BluetoothBroadcastReceiver(PythonJavaClass):
 
             elif action == "android.bluetooth.device.action.FOUND":
                 device = intent.getParcelableExtra("android.bluetooth.device.extra.DEVICE")
-                rssi = intent.getShortExtra("android.bluetooth.device.extra.RSSI", (short)0)
+                rssi = intent.getShortExtra("android.bluetooth.device.extra.RSSI", 0)
                 if device:
                     event = {
                         'type': 'device_found',
