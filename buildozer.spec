@@ -15,7 +15,7 @@ source.exclude_patterns = *.orig,*.pyc,*.pyo,*~,*.swp,.DS_Store,*badsyntax*.py,t
 
 version = 1.0.0
 
-requirements = hostpython3,python3,kivy==2.3.0,kivymd==1.2.0,asynckivy,asyncgui,pillow,cryptography,openssl,libffi
+requirements = hostpython3,python3,kivy==2.3.0,kivymd==1.2.0,asynckivy,asyncgui,pillow,cryptography,openssl,libffi,plyer,cython==0.29.33
 
 garden_requirements = mapview
 
@@ -44,6 +44,8 @@ android.minapi = 21
 android.ndk = 25b
 
 android.ndk_path = /usr/local/lib/android/sdk/ndk/25.1.8937393
+
+android.sdk_path = /usr/local/lib/android/sdk
 
 android.accept_sdk_license = True
 
