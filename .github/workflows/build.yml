@@ -83,8 +83,8 @@ jobs:
 
     - name: Setup Android SDK Path for Buildozer
       run: |
-        mkdir -p $HOME/android-sdk/tools
-        ln -s $ANDROID_HOME/cmdline-tools/latest/bin $HOME/android-sdk/tools/bin
+        mkdir -p $HOME/android-sdk
+        ln -s $ANDROID_HOME/cmdline-tools/latest $HOME/android-sdk/tools
         ln -s $ANDROID_HOME/platform-tools $HOME/android-sdk/platform-tools
         ls -l $HOME/android-sdk/tools/bin/sdkmanager
         
