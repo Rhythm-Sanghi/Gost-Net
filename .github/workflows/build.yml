@@ -70,6 +70,12 @@ jobs:
         wget https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
         unzip -q android-ndk-r25b-linux.zip
         mv android-ndk-r25b /usr/local/lib/android/sdk/ndk/25.1.8937393
+
+    - name: Setup Android SDK Path for Buildozer
+      run: |
+        mkdir -p /usr/local/lib/android/sdk/tools/bin
+        ln -s $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager /usr/local/lib/android/sdk/tools/bin/sdkmanager
+        chmod +x /usr/local/lib/android/sdk/tools/bin/sdkmanager
         
     - name: Cache Buildozer directory
       uses: actions/cache@v3
@@ -124,9 +130,9 @@ jobs:
     - name: Build debug APK
       if: steps.check_secrets.outputs.has_secrets == 'false'
       env:
+        ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+        ANDROID_HOME: /usr/local/lib/android/sdk
         ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/25.1.8937393
-        ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/25.1.8937393
-        ANT_HOME: /usr/share/ant
       run: |
         buildozer -v android debug
         
@@ -136,9 +142,9 @@ jobs:
         KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+        ANDROID_HOME: /usr/local/lib/android/sdk
         ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/25.1.8937393
-        ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/25.1.8937393
-        ANT_HOME: /usr/share/ant
       run: |
         buildozer -v android release
         
