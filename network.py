@@ -19,9 +19,31 @@ import hashlib
 import base64
 from pathlib import Path
 
-# Import network utilities for multi-interface detection
+from android_mocks import is_android, get_android_wifi_direct, get_android_bluetooth
+
 try:
-    from network_utils import NetworkDetector, NetworkMonitor
+    from routing import RoutingTable
+    ROUTING_AVAILABLE = True
+except ImportError:
+    ROUTING_AVAILABLE = False
+    print("[GhostEngine] Routing module not available - mesh networking disabled")
+
+try:
+    from security import CryptoManager
+    SECURITY_AVAILABLE = True
+except ImportError:
+    SECURITY_AVAILABLE = False
+    print("[GhostEngine] Security module not available")
+
+try:
+    from connection_manager import ConnectionManager
+    CONNECTION_MANAGER_AVAILABLE = True
+except ImportError:
+    CONNECTION_MANAGER_AVAILABLE = False
+    print("[GhostEngine] ConnectionManager not available")
+
+try:
+    from network_utils import NetworkDetector, NetworkMonitor, P2PPeerDiscovery, DiscoveryMode
     NETWORK_UTILS_AVAILABLE = True
 except ImportError:
     NETWORK_UTILS_AVAILABLE = False
@@ -35,7 +57,13 @@ except ImportError:
     STORAGE_AVAILABLE = False
     print("[GhostEngine] Storage module not available - running without persistence")
 
-# Import config module (optional)
+try:
+    from database import PersistenceDatabase
+    PERSISTENCE_AVAILABLE = True
+except ImportError:
+    PERSISTENCE_AVAILABLE = False
+    print("[GhostEngine] PersistenceDatabase not available - running without local persistence")
+
 try:
     from config import ConfigManager
     CONFIG_AVAILABLE = True
@@ -57,11 +85,13 @@ class GhostEngine:
     
     UDP_PORT = 37020
     TCP_PORT = 37021
-    BEACON_INTERVAL = 2  # seconds
-    PEER_TIMEOUT = 10    # seconds
+    BEACON_INTERVAL = 2
+    PEER_TIMEOUT = 10
     BUFFER_SIZE = 4096
+    CHUNK_SIZE = 8192
     HEADER_DELIMITER = b"<HEADER_END>"
-    MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB limit
+    CHUNK_DELIMITER = b"<CHUNK_END>"
+    MAX_FILE_SIZE = 100 * 1024 * 1024
     
     def __init__(self, username: str = None, on_message_received: Optional[Callable] = None,
                  on_peer_update: Optional[Callable] = None,
@@ -69,7 +99,9 @@ class GhostEngine:
                  downloads_dir: Optional[str] = None,
                  enable_storage: bool = True,
                  db_manager: Optional['DatabaseManager'] = None,
-                 config_manager: Optional['ConfigManager'] = None):
+                 persistence_db: Optional['PersistenceDatabase'] = None,
+                 config_manager: Optional['ConfigManager'] = None,
+                 connection_manager: Optional['ConnectionManager'] = None):
         """
         Initialize the Ghost Network Engine.
         
@@ -83,12 +115,14 @@ class GhostEngine:
             db_manager: External DatabaseManager instance (optional)
             config_manager: External ConfigManager instance (optional)
         """
-        # Configuration manager
+        self.crypto_manager = None
+        if SECURITY_AVAILABLE:
+            self.crypto_manager = CryptoManager()
+        
         self.config_manager = config_manager
         if not self.config_manager and CONFIG_AVAILABLE:
             self.config_manager = ConfigManager()
         
-        # Get username from config if not provided
         if username:
             self.username = username
         elif self.config_manager:
@@ -96,17 +130,35 @@ class GhostEngine:
         else:
             self.username = "GhostUser"
         
-        # Network detection with multi-interface support
+        self.peer_id = hashlib.sha256(self.username.encode()).hexdigest()[:16]
+        
+        self.routing_table = None
+        if ROUTING_AVAILABLE:
+            self.routing_table = RoutingTable(max_route_age=30.0)
+        
         self.network_detector = None
         self.network_monitor = None
+        self.peer_discovery = None
+        self.wifi_direct = None
+        self.bluetooth = None
+        
         if NETWORK_UTILS_AVAILABLE:
             self.network_detector = NetworkDetector()
             self.network_monitor = NetworkMonitor(on_network_changed=self._on_network_changed)
+            self.peer_discovery = self.network_monitor.get_peer_discovery()
+            self.peer_discovery.on_peers_discovered = self._on_offgrid_peers_discovered
+        
+        self.wifi_direct = get_android_wifi_direct()
+        self.bluetooth = get_android_bluetooth()
         
         self.local_ip = self._get_local_ip()
         self.current_network_type = 'unknown'
-        self.peers: Dict[str, dict] = {}  # {ip: {username, last_seen}}
+        self.peers: Dict[str, dict] = {}
         self.running = False
+        
+        self.connection_manager = connection_manager
+        if not self.connection_manager and CONNECTION_MANAGER_AVAILABLE:
+            self.connection_manager = ConnectionManager(engine=self)
         
         # Callbacks
         self.on_message_received = on_message_received
@@ -139,7 +191,14 @@ class GhostEngine:
                     # Continue without creating directory - app can still function
                     self.downloads_dir = os.getcwd()
         
-        # Database storage
+        self.persistence_db = None
+        if enable_storage and PERSISTENCE_AVAILABLE:
+            if persistence_db:
+                self.persistence_db = persistence_db
+            else:
+                self.persistence_db = PersistenceDatabase()
+            print("[GhostEngine] Local persistence database initialized")
+        
         self.db_manager = None
         if enable_storage and STORAGE_AVAILABLE:
             if db_manager:
@@ -165,6 +224,16 @@ class GhostEngine:
         self.listener_thread = None
         self.tcp_server_thread = None
         self.pruning_thread = None
+        self.routing_maintenance_thread = None
+        self.relay_forwarding_thread = None
+        
+        self.pending_forwards: list = []
+        self.forwards_lock = threading.Lock()
+        
+        self.sos_cache = []
+        self.sos_cache_lock = threading.Lock()
+        self.sos_cache_max_age = 300
+        self.on_sos_received = None
     
     def _get_local_ip(self) -> str:
         """Get the local IP address of this device with multi-interface support."""
@@ -365,11 +434,115 @@ class GhostEngine:
             except Exception as e:
                 print(f"[GhostEngine] Failed to start network monitor thread: {e}")
         
+        if self.routing_table:
+            try:
+                self.routing_maintenance_thread = threading.Thread(target=self._routing_maintenance_worker, daemon=True)
+                self.routing_maintenance_thread.start()
+                threads_started += 1
+                print("[GhostEngine] Routing maintenance thread started")
+            except Exception as e:
+                print(f"[GhostEngine] Failed to start routing maintenance thread: {e}")
+        
+        if self.routing_table:
+            try:
+                self.relay_forwarding_thread = threading.Thread(target=self._relay_forwarding_worker, daemon=True)
+                self.relay_forwarding_thread.start()
+                threads_started += 1
+                print("[GhostEngine] Relay forwarding thread started")
+            except Exception as e:
+                print(f"[GhostEngine] Failed to start relay forwarding thread: {e}")
+        
         print(f"[GhostEngine] {threads_started} threads started successfully.")
         
-        # Don't fail if no threads started - app can still function with limited capability
         if threads_started == 0:
             print("[GhostEngine] WARNING: No background threads started - limited functionality")
+        
+        self._start_wifi_direct_discovery()
+        self._start_bluetooth_discovery()
+        
+        if self.connection_manager:
+            print("[GhostEngine] ConnectionManager initialized")
+    
+    def _start_wifi_direct_discovery(self):
+        if not self.wifi_direct:
+            return
+        
+        try:
+            self.wifi_direct.enable()
+            print("[WiFiDirect] Discovery enabled")
+            
+            def _wifi_discovery_worker():
+                while self.running:
+                    try:
+                        self.wifi_direct.discover_peers()
+                        time.sleep(5)
+                    except Exception as e:
+                        print(f"[WiFiDirect] Discovery error: {e}")
+                        time.sleep(5)
+            
+            threading.Thread(target=_wifi_discovery_worker, daemon=True).start()
+        except Exception as e:
+            print(f"[WiFiDirect] Initialization error: {e}")
+    
+    def _start_bluetooth_discovery(self):
+        if not self.bluetooth:
+            return
+        
+        try:
+            self.bluetooth.enable()
+            print("[Bluetooth] Discovery enabled")
+            
+            def _bt_discovery_worker():
+                while self.running:
+                    try:
+                        self.bluetooth.scan_devices()
+                        time.sleep(10)
+                    except Exception as e:
+                        print(f"[Bluetooth] Scan error: {e}")
+                        time.sleep(10)
+            
+            threading.Thread(target=_bt_discovery_worker, daemon=True).start()
+        except Exception as e:
+            print(f"[Bluetooth] Initialization error: {e}")
+    
+    def discover_wifi_direct_peers(self) -> Dict[str, dict]:
+        if not self.wifi_direct or not self.peer_discovery:
+            return {}
+        
+        try:
+            peers = self.wifi_direct.discover_peers()
+            for peer in peers:
+                mac = peer.get('mac_address', '')
+                name = peer.get('device_name', 'Unknown')
+                go_ip = peer.get('go_ip')
+                self.peer_discovery.add_wifi_direct_peer(mac, name, go_ip)
+            
+            print(f"[WiFiDirect] Discovered {len(peers)} peers")
+            return self.peer_discovery.get_peers_by_type('wifi_direct')
+        except Exception as e:
+            print(f"[WiFiDirect] Discovery error: {e}")
+            return {}
+    
+    def discover_bluetooth_peers(self) -> Dict[str, dict]:
+        if not self.bluetooth or not self.peer_discovery:
+            return {}
+        
+        try:
+            devices = self.bluetooth.scan_devices()
+            for device in devices:
+                bt_addr = device.get('address', '')
+                name = device.get('name', 'Unknown')
+                rssi = device.get('rssi')
+                self.peer_discovery.add_bluetooth_peer(bt_addr, name, rssi)
+            
+            print(f"[Bluetooth] Discovered {len(devices)} devices")
+            return self.peer_discovery.get_peers_by_type('bluetooth')
+        except Exception as e:
+            print(f"[Bluetooth] Scan error: {e}")
+            return {}
+    
+    def _on_offgrid_peers_discovered(self, all_peers: Dict[str, dict]):
+        print(f"[GhostEngine] P2P peers updated: {len(all_peers)} total")
     
     def stop(self):
         """Stop the network engine and clean up resources."""
@@ -389,9 +562,9 @@ class GhostEngine:
             except (OSError, AttributeError):
                 pass
         
-        # Wait for threads to finish
-        for thread in [self.beacon_thread, self.listener_thread, 
-                      self.tcp_server_thread, self.pruning_thread]:
+        for thread in [self.beacon_thread, self.listener_thread,
+                      self.tcp_server_thread, self.pruning_thread,
+                      self.routing_maintenance_thread, self.relay_forwarding_thread]:
             if thread and thread.is_alive():
                 thread.join(timeout=2.0)
         
@@ -411,10 +584,16 @@ class GhostEngine:
                 if self.config_manager:
                     current_username = self.config_manager.get_username()
                 
+                visible_peers = []
+                if self.routing_table:
+                    visible_peers = self.routing_table.get_direct_peers()
+                
                 beacon = {
                     "type": "BEACON",
                     "username": current_username,
-                    "ip": self.local_ip
+                    "ip": self.local_ip,
+                    "peer_id": self.peer_id,
+                    "visible_peers": visible_peers
                 }
                 message = json.dumps(beacon).encode('utf-8')
                 
@@ -449,15 +628,36 @@ class GhostEngine:
                 if beacon.get("type") == "BEACON":
                     username = beacon.get("username", "Unknown")
                     current_time = time.time()
+                    beacon_peer_id = beacon.get("peer_id", sender_ip)
+                    visible_peers = beacon.get("visible_peers", [])
                     
-                    # Update peers list
                     with self.peers_lock:
                         self.peers[sender_ip] = {
                             "username": username,
-                            "last_seen": current_time
+                            "last_seen": current_time,
+                            "peer_id": beacon_peer_id,
+                            "visible_peers": visible_peers
                         }
                     
-                    # Save to database
+                    if self.routing_table:
+                        self.routing_table.add_direct_route(beacon_peer_id)
+                        
+                        for visible_peer_id in visible_peers:
+                            if visible_peer_id != self.peer_id:
+                                self.routing_table.add_route(
+                                    visible_peer_id,
+                                    beacon_peer_id,
+                                    1,
+                                    [visible_peer_id, beacon_peer_id]
+                                )
+                    
+                    if self.persistence_db:
+                        threading.Thread(
+                            target=self.persistence_db.save_peer,
+                            args=(sender_ip, username, None, "udp", current_time),
+                            daemon=True
+                        ).start()
+                    
                     if self.db_manager:
                         threading.Thread(
                             target=self.db_manager.save_peer,
@@ -465,11 +665,8 @@ class GhostEngine:
                             daemon=True
                         ).start()
                     
-                    # Notify UI
                     if self.on_peer_update:
                         self.on_peer_update(self.get_peers())
-                    
-                    # print(f"[Listener] Discovered peer: {username} @ {sender_ip}")
                 
             except socket.timeout:
                 continue
@@ -533,7 +730,6 @@ class GhostEngine:
         sender_ip = addr[0]
         
         try:
-            # Step 1: Read the header
             header_data = b""
             while True:
                 chunk = conn.recv(1024)
@@ -541,12 +737,9 @@ class GhostEngine:
                     break
                 header_data += chunk
                 
-                # Check for header delimiter
                 if self.HEADER_DELIMITER in header_data:
-                    # Split at delimiter
                     header_part, remaining_data = header_data.split(self.HEADER_DELIMITER, 1)
                     
-                    # Decrypt and parse header
                     try:
                         header_json = self._decrypt_message(header_part)
                         header = json.loads(header_json)
@@ -554,11 +747,21 @@ class GhostEngine:
                         print(f"[TCP Handler] Invalid header from {sender_ip}: {e}")
                         return
                     
-                    # Process based on type
+                    target_peer_id = header.get("target_peer_id")
+                    network_ttl = header.get("network_ttl", 10)
+                    
+                    if target_peer_id and target_peer_id != self.peer_id and network_ttl > 0 and self.routing_table:
+                        route = self.routing_table.get_route(target_peer_id)
+                        if route:
+                            self._queue_packet_forward(sender_ip, target_peer_id, header, remaining_data, network_ttl)
+                            return
+                    
                     if header.get("type") == "TEXT":
                         self._handle_text_message(sender_ip, header, remaining_data, conn)
                     elif header.get("type") == "FILE":
                         self._handle_file_transfer(sender_ip, header, remaining_data, conn)
+                    elif header.get("message_type") == "SOS":
+                        self._handle_sos_message(sender_ip, header, remaining_data)
                     else:
                         print(f"[TCP Handler] Unknown type: {header.get('type')}")
                     
@@ -568,6 +771,19 @@ class GhostEngine:
             print(f"[TCP Handler] Error handling connection from {sender_ip}: {e}")
         finally:
             conn.close()
+
+    def _decrypt_p2p_payload(self, peer_id: str, encrypted_payload: bytes) -> Optional[bytes]:
+        if not self.crypto_manager or len(encrypted_payload) < 12:
+            return encrypted_payload
+
+        try:
+            nonce = encrypted_payload[:12]
+            ciphertext = encrypted_payload[12:]
+            plaintext = self.crypto_manager.decrypt_message(peer_id, nonce, ciphertext)
+            return plaintext
+        except Exception as e:
+            print(f"[GhostEngine] P2P decryption failed for {peer_id}: {e}")
+            return None
     
     def _handle_text_message(self, sender_ip: str, header: dict, initial_data: bytes, conn: socket.socket):
         """Handle incoming text message."""
@@ -575,10 +791,17 @@ class GhostEngine:
             message_text = header.get("content", "")
             timestamp = datetime.now().strftime("%H:%M:%S")
             timestamp_unix = time.time()
+            ttl = header.get("ttl")
             
             print(f"[TCP] Message from {sender_ip}: {message_text}")
             
-            # Save to database (in background)
+            if self.persistence_db:
+                threading.Thread(
+                    target=self.persistence_db.save_message,
+                    args=(sender_ip, "them", "text", message_text, timestamp_unix, ttl),
+                    daemon=True
+                ).start()
+            
             if self.db_manager:
                 threading.Thread(
                     target=self.db_manager.save_message,
@@ -586,7 +809,6 @@ class GhostEngine:
                     daemon=True
                 ).start()
             
-            # Notify UI via callback
             if self.on_message_received:
                 self.on_message_received(sender_ip, message_text, timestamp)
         
@@ -594,72 +816,73 @@ class GhostEngine:
             print(f"[TCP Handler] Text message error: {e}")
     
     def _handle_file_transfer(self, sender_ip: str, header: dict, initial_data: bytes, conn: socket.socket):
-        """Handle incoming file transfer (runs in background thread)."""
+        """Handle incoming file transfer with chunk reassembly."""
         try:
             filename = header.get("filename", "unknown_file")
             filesize = header.get("filesize", 0)
+            file_id = header.get("file_id", "unknown")
+            is_chunked = header.get("chunked", False)
             checksum = header.get("checksum", "")
+            ttl = header.get("ttl")
             
             print(f"[File Transfer] Receiving '{filename}' ({filesize} bytes) from {sender_ip}")
             
-            # Validate file size
             if filesize > self.MAX_FILE_SIZE:
                 print(f"[File Transfer] File too large: {filesize} bytes (max {self.MAX_FILE_SIZE})")
                 return
             
-            # Create safe filename
             safe_filename = self._sanitize_filename(filename)
             filepath = os.path.join(self.downloads_dir, safe_filename)
             
-            # If file exists, add number suffix
             base, ext = os.path.splitext(filepath)
             counter = 1
             while os.path.exists(filepath):
                 filepath = f"{base}_{counter}{ext}"
                 counter += 1
             
-            # Write file in chunks
             bytes_received = len(initial_data)
             
-            with open(filepath, 'wb') as f:
-                # Write initial data
-                f.write(initial_data)
+            if is_chunked:
+                self._handle_chunked_file_transfer(filepath, filesize, bytes_received, initial_data, conn, sender_ip, filename, checksum, ttl)
+            else:
+                with open(filepath, 'wb') as f:
+                    f.write(initial_data)
+                    while bytes_received < filesize:
+                        chunk = conn.recv(min(self.BUFFER_SIZE, filesize - bytes_received))
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        bytes_received += len(chunk)
+                        if bytes_received % (self.BUFFER_SIZE * 10) == 0:
+                            progress = (bytes_received / filesize) * 100
+                            print(f"[File Transfer] Progress: {progress:.1f}%")
                 
-                # Receive remaining chunks
-                while bytes_received < filesize:
-                    chunk = conn.recv(min(self.BUFFER_SIZE, filesize - bytes_received))
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    bytes_received += len(chunk)
-                    
-                    # Progress indicator
-                    progress = (bytes_received / filesize) * 100
-                    if bytes_received % (self.BUFFER_SIZE * 10) == 0:
-                        print(f"[File Transfer] Progress: {progress:.1f}%")
-            
-            # Verify checksum
-            received_checksum = self._calculate_checksum(filepath)
-            if checksum and received_checksum != checksum:
-                print(f"[File Transfer] Checksum mismatch! Expected {checksum}, got {received_checksum}")
-                os.remove(filepath)
-                return
-            
-            timestamp = datetime.now().strftime("%H:%M:%S")
-            timestamp_unix = time.time()
-            print(f"[File Transfer] Successfully received '{filename}' → {filepath}")
-            
-            # Save to database (in background)
-            if self.db_manager:
-                threading.Thread(
-                    target=self.db_manager.save_message,
-                    args=(sender_ip, "PEER", filename, "FILE", filepath, timestamp_unix),
-                    daemon=True
-                ).start()
-            
-            # Notify UI via callback
-            if self.on_file_received:
-                self.on_file_received(sender_ip, filename, filepath, timestamp)
+                received_checksum = self._calculate_checksum(filepath)
+                if checksum and received_checksum != checksum:
+                    print(f"[File Transfer] Checksum mismatch! Expected {checksum}, got {received_checksum}")
+                    os.remove(filepath)
+                    return
+                
+                timestamp = datetime.now().strftime("%H:%M:%S")
+                timestamp_unix = time.time()
+                print(f"[File Transfer] Successfully received '{filename}' → {filepath}")
+                
+                if self.persistence_db:
+                    threading.Thread(
+                        target=self.persistence_db.save_message,
+                        args=(sender_ip, "them", "file", filename, timestamp_unix, ttl),
+                        daemon=True
+                    ).start()
+                
+                if self.db_manager:
+                    threading.Thread(
+                        target=self.db_manager.save_message,
+                        args=(sender_ip, "PEER", filename, "FILE", filepath, timestamp_unix),
+                        daemon=True
+                    ).start()
+                
+                if self.on_file_received:
+                    self.on_file_received(sender_ip, filename, filepath, timestamp)
         
         except Exception as e:
             print(f"[File Transfer] Error: {e}")
@@ -692,6 +915,72 @@ class GhostEngine:
         
         return sanitized
     
+    def _handle_chunked_file_transfer(self, filepath: str, filesize: int, initial_bytes: int, initial_data: bytes, conn: socket.socket, sender_ip: str, filename: str, checksum: str, ttl: Optional[int] = None):
+        """Handle chunked encrypted file transfer with on-the-fly decryption."""
+        try:
+            with open(filepath, 'wb') as f:
+                f.write(initial_data)
+                bytes_received = initial_bytes
+                
+                while bytes_received < filesize:
+                    chunk_header = conn.recv(32)
+                    if not chunk_header or len(chunk_header) < 32:
+                        break
+                    
+                    nonce = chunk_header[:12]
+                    chunk_size_bytes = chunk_header[12:16]
+                    chunk_size = int.from_bytes(chunk_size_bytes, 'big')
+                    
+                    encrypted_chunk = b''
+                    while len(encrypted_chunk) < chunk_size:
+                        remaining = chunk_size - len(encrypted_chunk)
+                        data = conn.recv(min(self.CHUNK_SIZE, remaining))
+                        if not data:
+                            break
+                        encrypted_chunk += data
+                    
+                    if self.crypto_manager:
+                        decrypted = self.crypto_manager.decrypt_file_chunk(sender_ip, nonce, encrypted_chunk)
+                        if decrypted:
+                            f.write(decrypted)
+                    else:
+                        f.write(encrypted_chunk)
+                    
+                    bytes_received += len(encrypted_chunk)
+                    progress = (bytes_received / filesize) * 100
+                    if bytes_received % (self.CHUNK_SIZE * 10) == 0:
+                        print(f"[File Transfer] Progress: {progress:.1f}%")
+            
+            received_checksum = self._calculate_checksum(filepath)
+            if checksum and received_checksum != checksum:
+                print(f"[File Transfer] Checksum mismatch! Expected {checksum}, got {received_checksum}")
+                os.remove(filepath)
+                return
+            
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            timestamp_unix = time.time()
+            print(f"[File Transfer] Successfully received chunked '{filename}' → {filepath}")
+            
+            if self.persistence_db:
+                threading.Thread(
+                    target=self.persistence_db.save_message,
+                    args=(sender_ip, "them", "file", filename, timestamp_unix, ttl),
+                    daemon=True
+                ).start()
+            
+            if self.db_manager:
+                threading.Thread(
+                    target=self.db_manager.save_message,
+                    args=(sender_ip, "PEER", filename, "FILE", filepath, timestamp_unix),
+                    daemon=True
+                ).start()
+            
+            if self.on_file_received:
+                self.on_file_received(sender_ip, filename, filepath, timestamp)
+        
+        except Exception as e:
+            print(f"[File Transfer] Chunked transfer error: {e}")
+    
     def _calculate_checksum(self, filepath: str) -> str:
         """Calculate SHA256 checksum of a file."""
         sha256 = hashlib.sha256()
@@ -700,43 +989,149 @@ class GhostEngine:
                 sha256.update(chunk)
         return sha256.hexdigest()
     
-    def send_message(self, target_ip: str, message_text: str) -> bool:
+    def _handle_sos_message(self, sender_ip: str, header: dict, encrypted_data: bytes):
+        try:
+            sos_json = self._decrypt_message(encrypted_data)
+            sos_payload = json.loads(sos_json)
+            
+            sos_id = sos_payload.get('sos_id')
+            from_peer = sos_payload.get('sender_id')
+            
+            with self.sos_cache_lock:
+                existing = any(c['sos_id'] == sos_id for c in self.sos_cache)
+                
+                if existing:
+                    print(f"[GhostEngine] SOS {sos_id} already processed, ignoring")
+                    return
+                
+                self.sos_cache.append({
+                    'sos_id': sos_id,
+                    'timestamp': sos_payload.get('timestamp', time.time()),
+                    'from_peer': from_peer
+                })
+                self.sos_cache = [c for c in self.sos_cache if time.time() - c['timestamp'] < self.sos_cache_max_age]
+            
+            print(f"[GhostEngine] SOS received from {sos_payload.get('sender_name')}")
+            
+            if self.on_sos_received:
+                self.on_sos_received(
+                    sos_payload.get('sender_name', 'Unknown'),
+                    sos_payload.get('latitude', 0),
+                    sos_payload.get('longitude', 0),
+                    sos_payload.get('message', 'EMERGENCY SOS'),
+                    sos_id
+                )
+            
+            with self.peers_lock:
+                peers_to_relay = [ip for ip in self.peers.keys() if ip != sender_ip]
+            
+            def relay_worker():
+                for peer_ip in peers_to_relay:
+                    try:
+                        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        sock.settimeout(3)
+                        sock.connect((peer_ip, self.TCP_PORT))
+                        
+                        header = {
+                            'type': 'message',
+                            'message_type': 'SOS',
+                            'sender_id': sos_payload.get('sender_id'),
+                            'sender_name': sos_payload.get('sender_name')
+                        }
+                        header_json = json.dumps(header)
+                        header_bytes = header_json.encode('utf-8')
+                        
+                        encrypted_sos = self._encrypt_message(sos_json)
+                        full_message = header_bytes + self.HEADER_DELIMITER + encrypted_sos
+                        sock.sendall(full_message)
+                        sock.close()
+                        print(f"[GhostEngine] SOS relayed to {peer_ip}")
+                    
+                    except Exception as e:
+                        print(f"[GhostEngine] SOS relay error to {peer_ip}: {e}")
+            
+            threading.Thread(target=relay_worker, daemon=True).start()
+        
+        except Exception as e:
+            print(f"[GhostEngine] SOS handling error: {e}")
+    
+    def send_message(self, target_ip: str, message_text: str, peer_id: str = None, ttl: Optional[int] = None) -> bool:
         """
-        Send an encrypted text message to a target peer via TCP.
+        Send an encrypted text message to a target peer via TCP or P2P connection.
         
         Args:
-            target_ip: IP address of the target peer
+            target_ip: IP address of the target peer (or peer_id for off-grid peers)
             message_text: The message to send
+            peer_id: Peer ID for off-grid peers (WiFi Direct/Bluetooth)
+            ttl: Time-to-live in seconds for message expiration (optional)
             
         Returns:
             True if sent successfully, False otherwise
         """
         try:
-            # Create header
+            if peer_id and self.connection_manager:
+                plaintext = message_text.encode('utf-8')
+                encrypted_payload = None
+
+                if self.crypto_manager:
+                    encryption_result = self.crypto_manager.encrypt_message(peer_id, plaintext)
+                    if encryption_result:
+                        nonce, ciphertext = encryption_result
+                        encrypted_payload = nonce + ciphertext
+                
+                if encrypted_payload:
+                    success = self.connection_manager.send_message_to_peer(peer_id, encrypted_payload)
+                else:
+                    success = self.connection_manager.send_message_to_peer(peer_id, plaintext)
+
+                if success:
+                    timestamp_unix = time.time()
+                    if self.persistence_db:
+                        threading.Thread(
+                            target=self.persistence_db.save_message,
+                            args=(peer_id, "me", "text", message_text, timestamp_unix, ttl),
+                            daemon=True
+                        ).start()
+                    if self.db_manager:
+                        threading.Thread(
+                            target=self.db_manager.save_message,
+                            args=(peer_id, "ME", message_text, "TEXT", None, timestamp_unix),
+                            daemon=True
+                        ).start()
+                    return True
+                return False
+            
             header = {
                 "type": "TEXT",
                 "content": message_text,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
+                "target_peer_id": target_ip,
+                "network_ttl": 10
             }
             
-            # Encrypt header
+            if ttl is not None and ttl > 0:
+                header["ttl"] = ttl
+            
             header_json = json.dumps(header)
             encrypted_header = self._encrypt_message(header_json)
             
-            # Create TCP connection
             client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            client_socket.settimeout(10.0)  # 10 second timeout
+            client_socket.settimeout(10.0)
             client_socket.connect((target_ip, self.TCP_PORT))
             
-            # Send header + delimiter
             client_socket.sendall(encrypted_header + self.HEADER_DELIMITER)
             
             client_socket.close()
             print(f"[Send] Message sent to {target_ip}")
             
-            # Save to database (in background)
+            timestamp_unix = time.time()
+            if self.persistence_db:
+                threading.Thread(
+                    target=self.persistence_db.save_message,
+                    args=(target_ip, "me", "text", message_text, timestamp_unix, ttl),
+                    daemon=True
+                ).start()
             if self.db_manager:
-                timestamp_unix = time.time()
                 threading.Thread(
                     target=self.db_manager.save_message,
                     args=(target_ip, "ME", message_text, "TEXT", None, timestamp_unix),
@@ -749,21 +1144,23 @@ class GhostEngine:
             print(f"[Send] Error sending to {target_ip}: {e}")
             return False
     
-    def send_file(self, target_ip: str, file_path: str, progress_callback: Optional[Callable] = None) -> bool:
+    def send_file(self, target_ip: str, file_path: str, progress_callback: Optional[Callable] = None, peer_id: str = None, use_chunking: bool = True, ttl: Optional[int] = None) -> bool:
         """
-        Send a file to a target peer via TCP (runs in background thread).
+        Send a file with encrypted chunking to target peer (background thread).
         
         Args:
-            target_ip: IP address of the target peer
-            file_path: Path to the file to send
-            progress_callback: Optional callback(bytes_sent, total_size) for progress updates
+            target_ip: IP address of target peer
+            file_path: Path to file to send
+            progress_callback: Optional callback(bytes_sent, total_size)
+            peer_id: Peer ID for off-grid peers
+            use_chunking: Enable encrypted chunking (default True)
+            ttl: Time-to-live in seconds for file expiration (optional)
             
         Returns:
-            True if sent successfully, False otherwise
+            True if started successfully
         """
         def _send_file_worker():
             try:
-                # Validate file
                 if not os.path.isfile(file_path):
                     print(f"[Send File] File not found: {file_path}")
                     return False
@@ -776,56 +1173,89 @@ class GhostEngine:
                 
                 filename = os.path.basename(file_path)
                 checksum = self._calculate_checksum(file_path)
+                file_id = hashlib.sha256(f"{filename}{time.time()}".encode()).hexdigest()[:16]
                 
                 print(f"[Send File] Sending '{filename}' ({filesize} bytes) to {target_ip}")
                 
-                # Create header
                 header = {
                     "type": "FILE",
                     "filename": filename,
                     "filesize": filesize,
+                    "file_id": file_id,
                     "checksum": checksum,
-                    "timestamp": datetime.now().isoformat()
+                    "chunked": use_chunking,
+                    "timestamp": datetime.now().isoformat(),
+                    "target_peer_id": target_ip,
+                    "network_ttl": 10
                 }
                 
-                # Encrypt header
+                if ttl is not None and ttl > 0:
+                    header["ttl"] = ttl
+                
                 header_json = json.dumps(header)
                 encrypted_header = self._encrypt_message(header_json)
                 
-                # Create TCP connection
                 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                client_socket.settimeout(30.0)  # 30 second timeout for files
+                client_socket.settimeout(30.0)
                 client_socket.connect((target_ip, self.TCP_PORT))
                 
-                # Send header + delimiter
                 client_socket.sendall(encrypted_header + self.HEADER_DELIMITER)
                 
-                # Send file in chunks
                 bytes_sent = 0
-                with open(file_path, 'rb') as f:
-                    while True:
-                        chunk = f.read(self.BUFFER_SIZE)
-                        if not chunk:
-                            break
-                        
-                        client_socket.sendall(chunk)
-                        bytes_sent += len(chunk)
-                        
-                        # Progress callback
-                        if progress_callback:
-                            progress_callback(bytes_sent, filesize)
-                        
-                        # Progress log
-                        if bytes_sent % (self.BUFFER_SIZE * 10) == 0:
-                            progress = (bytes_sent / filesize) * 100
-                            print(f"[Send File] Progress: {progress:.1f}%")
+                
+                if use_chunking and self.crypto_manager:
+                    with open(file_path, 'rb') as f:
+                        while True:
+                            chunk = f.read(self.CHUNK_SIZE)
+                            if not chunk:
+                                break
+                            
+                            nonce, ciphertext = self.crypto_manager.encrypt_file_chunk(target_ip, chunk)
+                            if not nonce or not ciphertext:
+                                chunk_data = chunk
+                                nonce = b'\x00' * 12
+                            else:
+                                chunk_data = ciphertext
+                            
+                            chunk_header = nonce + len(chunk_data).to_bytes(4, 'big')
+                            client_socket.sendall(chunk_header + chunk_data)
+                            
+                            bytes_sent += len(chunk_data)
+                            
+                            if progress_callback:
+                                progress_callback(bytes_sent, filesize)
+                            
+                            if bytes_sent % (self.CHUNK_SIZE * 10) == 0:
+                                progress = (bytes_sent / filesize) * 100
+                                print(f"[Send File] Progress: {progress:.1f}%")
+                else:
+                    with open(file_path, 'rb') as f:
+                        while True:
+                            chunk = f.read(self.BUFFER_SIZE)
+                            if not chunk:
+                                break
+                            
+                            client_socket.sendall(chunk)
+                            bytes_sent += len(chunk)
+                            
+                            if progress_callback:
+                                progress_callback(bytes_sent, filesize)
+                            
+                            if bytes_sent % (self.BUFFER_SIZE * 10) == 0:
+                                progress = (bytes_sent / filesize) * 100
+                                print(f"[Send File] Progress: {progress:.1f}%")
                 
                 client_socket.close()
                 print(f"[Send File] Successfully sent '{filename}' to {target_ip}")
                 
-                # Save to database (in background)
+                timestamp_unix = time.time()
+                if self.persistence_db:
+                    threading.Thread(
+                        target=self.persistence_db.save_message,
+                        args=(target_ip, "me", "file", filename, timestamp_unix, ttl),
+                        daemon=True
+                    ).start()
                 if self.db_manager:
-                    timestamp_unix = time.time()
                     threading.Thread(
                         target=self.db_manager.save_message,
                         args=(target_ip, "ME", filename, "FILE", file_path, timestamp_unix),
@@ -838,9 +1268,8 @@ class GhostEngine:
                 print(f"[Send File] Error: {e}")
                 return False
         
-        # Run in background thread to avoid blocking
         threading.Thread(target=_send_file_worker, daemon=True).start()
-        return True  # Return immediately
+        return True
     
     def _network_monitor_worker(self):
         """Monitor network changes and reconnect if needed."""
@@ -860,6 +1289,87 @@ class GhostEngine:
                 if self.running:
                     print(f"[Network Monitor] Error: {e}")
     
+    def _routing_maintenance_worker(self):
+        while self.running:
+            try:
+                time.sleep(10)
+                
+                if self.routing_table:
+                    stale = self.routing_table.remove_stale_routes()
+                    if stale:
+                        print(f"[Routing] Removed {len(stale)} stale routes")
+            
+            except Exception as e:
+                if self.running:
+                    print(f"[Routing] Maintenance error: {e}")
+    
+    def _relay_forwarding_worker(self):
+        while self.running:
+            try:
+                time.sleep(0.1)
+                
+                with self.forwards_lock:
+                    if not self.pending_forwards:
+                        continue
+                    
+                    forward_job = self.pending_forwards.pop(0)
+                
+                self._execute_packet_forward(forward_job)
+            
+            except Exception as e:
+                if self.running:
+                    print(f"[Relay] Forwarding error: {e}")
+    
+    def _queue_packet_forward(self, sender_ip: str, target_peer_id: str, header: dict, payload: bytes, ttl: int):
+        with self.forwards_lock:
+            self.pending_forwards.append({
+                'sender_ip': sender_ip,
+                'target_peer_id': target_peer_id,
+                'header': header,
+                'payload': payload,
+                'ttl': ttl
+            })
+    
+    def _execute_packet_forward(self, forward_job: dict):
+        try:
+            target_peer_id = forward_job['target_peer_id']
+            header = forward_job['header']
+            payload = forward_job['payload']
+            ttl = forward_job['ttl']
+            
+            route = self.routing_table.get_route(target_peer_id)
+            if not route:
+                print(f"[Relay] No route found for {target_peer_id}")
+                return
+            
+            next_hop_id = route.next_hop_id
+            next_hop_entry = self.routing_table.get_route(next_hop_id)
+            
+            if next_hop_entry and next_hop_entry.is_direct:
+                for ip, peer_info in self.peers.items():
+                    if peer_info.get('peer_id') == next_hop_id:
+                        header_copy = header.copy()
+                        header_copy['network_ttl'] = ttl - 1
+                        
+                        header_json = json.dumps(header_copy)
+                        encrypted_header = self._encrypt_message(header_json)
+                        
+                        try:
+                            client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                            client_socket.settimeout(5.0)
+                            client_socket.connect((ip, self.TCP_PORT))
+                            
+                            client_socket.sendall(encrypted_header + self.HEADER_DELIMITER + payload)
+                            client_socket.close()
+                            
+                            print(f"[Relay] Forwarded packet for {target_peer_id} via {next_hop_id} (TTL: {ttl-1})")
+                        except Exception as e:
+                            print(f"[Relay] Forward to {ip} failed: {e}")
+                        return
+        
+        except Exception as e:
+            print(f"[Relay] Forward execution error: {e}")
+    
     def _on_network_changed(self, old_ip, new_ip, network_type):
         """Callback when network changes."""
         print(f"[GhostEngine] Network changed: {old_ip} → {new_ip} ({network_type})")
@@ -867,26 +1377,178 @@ class GhostEngine:
         self.current_network_type = network_type
     
     def get_network_status(self) -> Dict[str, any]:
-        """Get current network status for UI display."""
         if self.network_detector:
             interfaces = self.network_detector.get_all_interfaces()
         else:
             interfaces = {}
         
+        p2p_peers = {}
+        if self.peer_discovery:
+            p2p_peers = self.peer_discovery.get_all_peers()
+        
         return {
             'ip': self.local_ip,
             'type': self.current_network_type,
             'interfaces': interfaces,
-            'is_connected': self.local_ip != "127.0.0.1"
+            'is_connected': self.local_ip != "127.0.0.1",
+            'wifi_direct_peers': self.peer_discovery.get_peers_by_type('wifi_direct') if self.peer_discovery else {},
+            'bluetooth_peers': self.peer_discovery.get_peers_by_type('bluetooth') if self.peer_discovery else {},
+            'all_p2p_peers': p2p_peers
         }
     
     def get_peers(self) -> Dict[str, dict]:
-        """Get a copy of the current peers dictionary."""
         with self.peers_lock:
             return self.peers.copy()
     
+    def get_all_peers_combined(self) -> Dict[str, dict]:
+        lan_peers = self.get_peers()
+        
+        p2p_peers = {}
+        if self.peer_discovery:
+            p2p_peers = self.peer_discovery.get_all_peers()
+        
+        combined = {}
+        combined.update(lan_peers)
+        combined.update(p2p_peers)
+        
+        return combined
+    
+    def get_wifi_direct_peers(self) -> Dict[str, dict]:
+        if self.peer_discovery:
+            return self.peer_discovery.get_peers_by_type('wifi_direct')
+        return {}
+    
+    def get_bluetooth_peers(self) -> Dict[str, dict]:
+        if self.peer_discovery:
+            return self.peer_discovery.get_peers_by_type('bluetooth')
+        return {}
+    
+    def broadcast_sos(self, latitude: float, longitude: float, message: str = "EMERGENCY SOS"):
+        try:
+            from gps_manager import get_gps_manager
+        except ImportError:
+            print("[GhostEngine] GPS manager not available")
+            latitude = 40.7128
+            longitude = -74.0060
+        
+        sos_id = hashlib.sha256(f"{latitude}{longitude}{time.time()}".encode()).hexdigest()[:16]
+        sos_timestamp = time.time()
+        
+        sos_payload = {
+            'type': 'SOS',
+            'sos_id': sos_id,
+            'timestamp': sos_timestamp,
+            'sender_id': self.peer_id,
+            'sender_name': self.username,
+            'latitude': latitude,
+            'longitude': longitude,
+            'message': message
+        }
+        
+        sos_json = json.dumps(sos_payload)
+        encrypted_sos = self._encrypt_message(sos_json)
+        
+        with self.sos_cache_lock:
+            self.sos_cache.append({
+                'sos_id': sos_id,
+                'timestamp': sos_timestamp,
+                'from_peer': self.peer_id
+            })
+            self.sos_cache = [c for c in self.sos_cache if time.time() - c['timestamp'] < self.sos_cache_max_age]
+        
+        with self.peers_lock:
+            peers_to_broadcast = list(self.peers.keys())
+        
+        def broadcast_worker():
+            for peer_ip in peers_to_broadcast:
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(3)
+                    sock.connect((peer_ip, self.TCP_PORT))
+                    
+                    header = {
+                        'type': 'message',
+                        'message_type': 'SOS',
+                        'sender_id': self.peer_id,
+                        'sender_name': self.username
+                    }
+                    header_json = json.dumps(header)
+                    header_bytes = header_json.encode('utf-8')
+                    
+                    full_message = header_bytes + self.HEADER_DELIMITER + encrypted_sos
+                    sock.sendall(full_message)
+                    sock.close()
+                    print(f"[GhostEngine] SOS broadcast sent to {peer_ip}")
+                
+                except Exception as e:
+                    print(f"[GhostEngine] SOS broadcast error to {peer_ip}: {e}")
+        
+        threading.Thread(target=broadcast_worker, daemon=True).start()
+        print(f"[GhostEngine] SOS broadcast initiated with ID {sos_id}")
+    
+    def _process_sos_message(self, sos_payload: dict, from_peer_ip: str):
+        try:
+            sos_id = sos_payload.get('sos_id')
+            sos_timestamp = sos_payload.get('timestamp', time.time())
+            from_peer = sos_payload.get('sender_id')
+            
+            with self.sos_cache_lock:
+                existing = any(c['sos_id'] == sos_id for c in self.sos_cache)
+                
+                if existing:
+                    print(f"[GhostEngine] SOS {sos_id} already processed, ignoring")
+                    return
+                
+                self.sos_cache.append({
+                    'sos_id': sos_id,
+                    'timestamp': sos_timestamp,
+                    'from_peer': from_peer
+                })
+                self.sos_cache = [c for c in self.sos_cache if time.time() - c['timestamp'] < self.sos_cache_max_age]
+            
+            if self.on_sos_received:
+                self.on_sos_received(
+                    sos_payload.get('sender_name', 'Unknown'),
+                    sos_payload.get('latitude', 0),
+                    sos_payload.get('longitude', 0),
+                    sos_payload.get('message', 'EMERGENCY SOS'),
+                    sos_id
+                )
+            
+            with self.peers_lock:
+                peers_to_relay = [ip for ip in self.peers.keys() if ip != from_peer_ip]
+            
+            def relay_worker():
+                for peer_ip in peers_to_relay:
+                    try:
+                        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        sock.settimeout(3)
+                        sock.connect((peer_ip, self.TCP_PORT))
+                        
+                        header = {
+                            'type': 'message',
+                            'message_type': 'SOS',
+                            'sender_id': sos_payload.get('sender_id'),
+                            'sender_name': sos_payload.get('sender_name')
+                        }
+                        header_json = json.dumps(header)
+                        header_bytes = header_json.encode('utf-8')
+                        
+                        encrypted_sos = self._encrypt_message(json.dumps(sos_payload))
+                        full_message = header_bytes + self.HEADER_DELIMITER + encrypted_sos
+                        sock.sendall(full_message)
+                        sock.close()
+                        print(f"[GhostEngine] SOS relayed to {peer_ip}")
+                    
+                    except Exception as e:
+                        print(f"[GhostEngine] SOS relay error to {peer_ip}: {e}")
+            
+            threading.Thread(target=relay_worker, daemon=True).start()
+        
+        except Exception as e:
+            print(f"[GhostEngine] SOS processing error: {e}")
+    
     def get_peer_username(self, ip: str) -> str:
-        """Get the username of a peer by IP address."""
         with self.peers_lock:
             peer = self.peers.get(ip)
             return peer["username"] if peer else "Unknown"

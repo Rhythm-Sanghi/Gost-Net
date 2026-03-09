@@ -20,6 +20,9 @@ netifaces>=0.11.0
 # Image processing (required by Kivy)
 pillow>=10.0.0
 
+# GIS & Mapping (for offline tactical map visualization)
+kivy_garden.mapview
+
 # Development/Testing (optional)
 # pytest>=7.4.0
 # pytest-asyncio>=0.21.0

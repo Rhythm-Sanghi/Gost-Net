@@ -35,7 +35,7 @@ requirements = hostpython3,python3,kivy==2.3.0,kivymd==1.2.0,asynckivy,asyncgui,
 # requirements.source.kivy = ../../kivy
 
 # (list) Garden requirements
-#garden_requirements =
+garden_requirements = mapview
 
 # (str) Presplash of the application
 presplash.filename = %(source.dir)s/presplash.png
@@ -47,7 +47,7 @@ icon.filename = %(source.dir)s/icon.png
 orientation = portrait
 
 # (list) List of service to declare
-#services = NAME:ENTRYPOINT_TO_PY,NAME2:ENTRYPOINT2_TO_PY
+services = GhostService:service.py
 
 #
 # OSX Specific
@@ -89,7 +89,8 @@ android.presplash_color = #121212
 # (list) Permissions
 # CRITICAL: These permissions are required for local network discovery, messaging, file transfers,
 # Wi-Fi Direct (API 33+), and Bluetooth (API 31+). Runtime permissions required for API 33+.
-android.permissions = INTERNET,ACCESS_NETWORK_STATE,ACCESS_WIFI_STATE,CHANGE_WIFI_MULTICAST_STATE,CHANGE_NETWORK_STATE,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,WAKE_LOCK,NEARBY_WIFI_DEVICES,BLUETOOTH,BLUETOOTH_ADMIN,BLUETOOTH_SCAN,BLUETOOTH_CONNECT,ACCESS_FINE_LOCATION,ACCESS_COARSE_LOCATION,CHANGE_WIFI_STATE,LOCAL_MAC_ADDRESS
+# POST_NOTIFICATIONS and FOREGROUND_SERVICE added for background service (API 33+)
+android.permissions = INTERNET,ACCESS_NETWORK_STATE,ACCESS_WIFI_STATE,CHANGE_WIFI_MULTICAST_STATE,CHANGE_NETWORK_STATE,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,WAKE_LOCK,NEARBY_WIFI_DEVICES,BLUETOOTH,BLUETOOTH_ADMIN,BLUETOOTH_SCAN,BLUETOOTH_CONNECT,ACCESS_FINE_LOCATION,ACCESS_COARSE_LOCATION,CHANGE_WIFI_STATE,LOCAL_MAC_ADDRESS,POST_NOTIFICATIONS,FOREGROUND_SERVICE,RECORD_AUDIO
 
 # (int) Target Android API, should be as high as possible.
 android.api = 33
@@ -229,11 +230,8 @@ android.wakelock = True
 # (list) Android application meta-data to set (key=value format)
 #android.meta_data =
 
-# (str) Android logcat filters to use
-#android.logcat_filters = *:S python:D
-
-# (bool) Android logcat only display log for activity's pid
-#android.logcat_pid_only = False
+android.logcat_filters = *:S python:D
+android.logcat_pid_only = True
 
 # (str) Android additional adb arguments
 #android.adb_args = -H host.docker.internal
@@ -296,8 +294,7 @@ p4a.branch = master
 # (str) pypi distribution name to use
 # p4a.dist_name = kivy
 
-# (int) LOG_LEVEL, should be one of TRACE, DEBUG, INFO, WARN, ERROR, CRITICAL (default INFO)
-#p4a.log_level = INFO
+p4a.log_level = ERROR
 
 # (str) Cython compiler directives for Python 3 compatibility
 # Explicitly set language_level to 3 to fix Cython warnings and Python 2 incompatibility
@@ -322,8 +319,10 @@ p4a.cython_directives = {"language_level": "3"}
 # (str) Bootstrap to use for android builds
 # p4a.bootstrap = sdl2
 
-# (int) port number to specify an explicit --port= p4a argument (eg for bootstrap flask)
 #p4a.port =
+
+p4a.release_dir = .buildozer/android/platform/build-{arch}/dist
+android.release_artifact = aab
 
 #
 # iOS specific
@@ -373,8 +372,7 @@ ios.codesign.allowed = false
 
 [buildozer]
 
-# (int) Log level (0 = error only, 1 = info, 2 = debug (with command output))
-log_level = 2
+log_level = 1
 
 # (int) Display warning if buildozer is run as root (0 = False, 1 = True)
 warn_on_root = 1
