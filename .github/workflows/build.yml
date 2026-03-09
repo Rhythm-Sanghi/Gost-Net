@@ -70,15 +70,13 @@ jobs:
         wget https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
         unzip -q android-ndk-r25b-linux.zip
         sudo mv android-ndk-r25b /usr/local/lib/android/sdk/ndk/25.1.8937393
-        sudo chmod -R +x /usr/local/lib/android/sdk/ndk/25.1.8937393
 
     - name: Setup Android SDK Path for Buildozer
       run: |
-        mkdir -p $HOME/android-sdk/tools/bin
-        ln -s $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager $HOME/android-sdk/tools/bin/sdkmanager
-        ln -s $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager $HOME/android-sdk/tools/bin/avdmanager
+        mkdir -p $HOME/android-sdk/tools
+        ln -s $ANDROID_HOME/cmdline-tools/latest/bin $HOME/android-sdk/tools/bin
         ln -s $ANDROID_HOME/platform-tools $HOME/android-sdk/platform-tools
-        chmod +x $HOME/android-sdk/tools/bin/sdkmanager
+        ls -l $HOME/android-sdk/tools/bin/sdkmanager
         
     - name: Cache Buildozer directory
       uses: actions/cache@v3
