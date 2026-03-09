@@ -43,7 +43,7 @@ android.minapi = 21
 
 android.ndk = 25b
 
-android.ndk_path = /tmp/ndk-download/android-ndk-r25b
+android.ndk_path = /usr/local/lib/android/sdk/ndk/25.1.8937393
 
 android.accept_sdk_license = True
 

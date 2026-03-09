@@ -32,6 +32,8 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y \
           build-essential \
+          g++ \
+          cmake \
           git \
           zip \
           unzip \
@@ -45,7 +47,6 @@ jobs:
           libncurses5-dev \
           libncursesw5-dev \
           libtinfo6 \
-          cmake \
           libffi-dev \
           libssl-dev \
           python3-dev \
@@ -63,11 +64,13 @@ jobs:
 
     - name: Download and extract Android NDK r25b
       run: |
-        mkdir -p /tmp/ndk-download
-        cd /tmp/ndk-download
-        wget https://dl.google.com/android/repository/android-ndk-r25b-linux.x86_64.zip
-        unzip -q android-ndk-r25b-linux.x86_64.zip
-        echo "ANDROID_NDK_HOME=/tmp/ndk-download/android-ndk-r25b" >> $GITHUB_ENV
+        mkdir -p /usr/local/lib/android/sdk/ndk
+        cd /tmp
+        wget https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
+        unzip -q android-ndk-r25b-linux.zip
+        mv android-ndk-r25b /usr/local/lib/android/sdk/ndk/25.1.8937393
+        echo "ANDROID_NDK_HOME=/usr/local/lib/android/sdk/ndk/25.1.8937393" >> $GITHUB_ENV
+        echo "PATH=$PATH:/usr/local/lib/android/sdk/ndk/25.1.8937393" >> $GITHUB_ENV
         
     - name: Cache Buildozer directory
       uses: actions/cache@v3
@@ -81,9 +84,9 @@ jobs:
           
     - name: Install Python dependencies
       run: |
-        pip install --upgrade pip setuptools wheel
-        pip install --upgrade cython==0.29.36
+        pip install --upgrade pip
         pip install --upgrade buildozer
+        pip install --upgrade cython==0.29.33
         pip install -r requirements.txt
         
     - name: Configure Cython for Python 3 compatibility
@@ -126,7 +129,7 @@ jobs:
     - name: Build debug APK
       if: steps.check_secrets.outputs.has_secrets == 'false'
       env:
-        ANDROID_NDK_HOME: /tmp/ndk-download/android-ndk-r25b
+        ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/25.1.8937393
       run: |
         buildozer -v android debug
         
@@ -136,7 +139,7 @@ jobs:
         KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        ANDROID_NDK_HOME: /tmp/ndk-download/android-ndk-r25b
+        ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/25.1.8937393
       run: |
         buildozer -v android release
         
