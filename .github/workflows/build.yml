@@ -63,13 +63,23 @@ jobs:
         echo "_JAVA_OPTIONS=-Xms512m -Xmx2048m" >> $GITHUB_ENV
         echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
 
+    - name: Cache NDK download
+      uses: actions/cache@v3
+      with:
+        path: /tmp/android-ndk-r25b-linux.zip
+        key: ndk-r25b-linux-${{ hashFiles('buildozer.spec') }}
+        restore-keys: |
+          ndk-r25b-linux-
+
     - name: Download and extract Android NDK r25b
       run: |
+        if [ ! -f /tmp/android-ndk-r25b-linux.zip ]; then
+          cd /tmp
+          wget --quiet https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
+        fi
         mkdir -p /usr/local/lib/android/sdk/ndk
-        cd /tmp
-        wget https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
-        unzip -q android-ndk-r25b-linux.zip
-        sudo mv android-ndk-r25b /usr/local/lib/android/sdk/ndk/25.1.8937393
+        unzip -q /tmp/android-ndk-r25b-linux.zip -d /tmp
+        sudo mv /tmp/android-ndk-r25b /usr/local/lib/android/sdk/ndk/25.1.8937393
 
     - name: Setup Android SDK Path for Buildozer
       run: |
