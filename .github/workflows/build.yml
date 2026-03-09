@@ -5,7 +5,7 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main ]
-  workflow_dispatch:  # Allow manual triggering
+  workflow_dispatch:
 
 jobs:
   build:
@@ -21,7 +21,7 @@ jobs:
       run: |
         git config --global user.email "build@ghostnet.local"
         git config --global user.name "Ghost Net Builder"
-      
+       
     - name: Set up Python 3.10
       uses: actions/setup-python@v5
       with:
@@ -60,6 +60,14 @@ jobs:
       run: |
         echo "_JAVA_OPTIONS=-Xms512m -Xmx2048m" >> $GITHUB_ENV
         echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
+
+    - name: Download and extract Android NDK r25b
+      run: |
+        mkdir -p /tmp/ndk-download
+        cd /tmp/ndk-download
+        wget https://dl.google.com/android/repository/android-ndk-r25b-linux.x86_64.zip
+        unzip -q android-ndk-r25b-linux.x86_64.zip
+        echo "ANDROID_NDK_HOME=/tmp/ndk-download/android-ndk-r25b" >> $GITHUB_ENV
         
     - name: Cache Buildozer directory
       uses: actions/cache@v3
@@ -92,6 +100,10 @@ jobs:
         cat > ~/.buildozer/cython_directives.txt << 'EOF'
         language_level=3
         EOF
+
+    - name: Clean Buildozer cache
+      run: |
+        buildozer android clean
         
     - name: Generate app assets
       run: |
@@ -113,6 +125,8 @@ jobs:
         
     - name: Build debug APK
       if: steps.check_secrets.outputs.has_secrets == 'false'
+      env:
+        ANDROID_NDK_HOME: /tmp/ndk-download/android-ndk-r25b
       run: |
         buildozer -v android debug
         
@@ -122,17 +136,16 @@ jobs:
         KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        ANDROID_NDK_HOME: /tmp/ndk-download/android-ndk-r25b
       run: |
         buildozer -v android release
         
     - name: Sign release APK
       if: steps.check_secrets.outputs.has_secrets == 'true'
       run: |
-        # Find the unsigned APK
         APK_PATH=$(find bin -name "*.apk" -type f | head -n 1)
         SIGNED_APK_PATH="${APK_PATH%-unsigned.apk}-signed.apk"
         
-        # Sign with apksigner
         $ANDROID_HOME/build-tools/*/apksigner sign \
           --ks ghostnet.keystore \
           --ks-pass pass:"${{ secrets.KEYSTORE_PASSWORD }}" \
@@ -141,7 +154,6 @@ jobs:
           --out "$SIGNED_APK_PATH" \
           "$APK_PATH"
           
-        # Verify signature
         $ANDROID_HOME/build-tools/*/apksigner verify "$SIGNED_APK_PATH"
         
         echo "Signed APK: $SIGNED_APK_PATH"
