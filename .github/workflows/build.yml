@@ -87,6 +87,7 @@ jobs:
         ln -s $ANDROID_HOME/cmdline-tools/latest $HOME/android-sdk/tools
         ln -s $ANDROID_HOME/platform-tools $HOME/android-sdk/platform-tools
         ls -l $HOME/android-sdk/tools/bin/sdkmanager
+        yes | $HOME/android-sdk/tools/bin/sdkmanager --sdk_root=$HOME/android-sdk "platforms;android-33" "build-tools;33.0.2"
         
     - name: Cache Buildozer directory
       uses: actions/cache@v3
