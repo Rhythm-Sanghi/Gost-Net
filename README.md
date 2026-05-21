@@ -1,565 +1,257 @@
-# 👻 Ghost Net
+![Build Status](https://github.com/Rhythm-Sanghi/Gost-Net/actions/workflows/build.yml/badge.svg)
 
-<div align="center">
+# 👻 Ghost Net v1.0
 
-![Ghost Net Promo](mockups/screenshot_promo.png)
-
-**Surveillance-Free P2P Messaging for the Privacy-Conscious**
-
-[![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
-[![Kivy](https://img.shields.io/badge/Kivy-2.3.0-green.svg)](https://kivy.org/)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
-
-[📥 Download APK](#-installation) • [📖 Documentation](#-documentation) • [🌐 Website](web/index.html) • [🤝 Contribute](#-contributing)
-
-</div>
+**An encrypted, decentralized, multi-hop mesh communication network for off-grid tactical operations.**
 
 ---
 
-## 🚨 The Problem
+## Overview
 
-> **"If you're not paying for the product, you ARE the product."**
+Ghost Net is a production-grade mobile mesh network framework engineered for secure, resilient communication in austere and contested environments. Designed for tactical teams, humanitarian operations, and decentralized networks, Ghost Net provides authenticated encryption, multi-hop routing with blind relays, offline-first operational capability, and forensic countermeasures.
 
-Every day, billions of people trust their private conversations to:
-- 📡 **Centralized servers** that log everything
-- 🕵️ **Data brokers** who sell your metadata
-- 👁️ **Governments** with backdoor access
-- 💰 **Corporations** monetizing your relationships
-
-**Even "encrypted" apps leak:**
-- Who you talk to (metadata)
-- When you talk (timing analysis)
-- Where you are (IP addresses)
-- What devices you use (fingerprinting)
+Built on Kivy for Android with cryptographic hardening, Ghost Net eliminates dependency on cellular infrastructure while maintaining operational security through end-to-end encryption and duress protection mechanisms.
 
 ---
 
-## 💡 The Solution: Ghost Net
+## Core Capabilities
 
-**What if your messages never touched a server?**
+| Capability | Implementation | Status |
+|---|---|---|
+| **Encryption** | ECDH (SECP384R1) + AES-256-GCM authenticated encryption with forward secrecy | ✓ Production |
+| **Mesh Networking** | Multi-hop blind relay routing protocol with dynamic peer discovery and topology adaptation | ✓ Production |
+| **Stealth & OPSEC** | Duress PIN triggers, cryptographic data shredder, suppressed diagnostic telemetry, minimal logging footprint | ✓ Production |
+| **Offline Operations** | Cached tactical maps via kivy_garden.mapview, GPS/SOS emergency broadcast flooding, PTT audio notes with local playback | ✓ Production |
+| **Push-to-Talk** | Real-time voice streaming with adaptive codec selection and mesh-routed delivery | ✓ Production |
+| **Mission Telemetry** | SQLite-backed flight data recorder with encrypted event logging and forensic extraction | ✓ Production |
+| **Platform Abstraction** | Android P2P, WiFi Direct, Bluetooth LE with feature parity across platforms | ✓ Production |
 
-Ghost Net is a **zero-server, peer-to-peer messaging app** that runs entirely over your local Wi-Fi network. No internet required. No servers to compromise. No metadata to leak.
+---
 
-### 🎯 Core Philosophy
+## Architecture Subsystems
 
+### End-to-End Encryption (E2EE)
+
+- ECDH key exchange on SECP384R1 curve (384-bit ephemeral keys)
+- AES-256-GCM authenticated encryption (16-byte nonce, 16-byte authentication tag)
+- Per-session key derivation with HKDF-SHA256
+- Forward secrecy: keys rotated per message batch
+
+### Multi-Hop Mesh Routing
+
+- Blind relay protocol: intermediate nodes forward without decryption
+- Hop-limited flooding (TTL enforcement) to prevent loops
+- Dynamic peer table with RSSI-weighted route selection
+- Mesh healing: automatic alternate path discovery on link loss
+
+### SQLite Persistence Layer
+
+- Encrypted database schema with AES-256-GCM at rest
+- Atomic transactions for mission-critical telemetry
+- Journaled writes to prevent data corruption on power loss
+- Rapid checkpoint cycles for low-latency logging
+
+### Push-to-Talk Audio Manager
+
+- Opus codec with 20ms frame rate and 48kHz sampling
+- Adaptive bitrate (8-128 kbps) for bandwidth-constrained mesh links
+- Mesh-routed delivery with per-hop jitter buffering
+- Automatic gain control and voice activity detection
+
+### Tactical Maps (Offline)
+
+- Map tiles cached from OpenStreetMap during setup phase
+- Offline rendering without internet dependency
+- GPS waypoint overlay with SOS broadcast coordinates
+- Map-view integration with Radar peer display
+
+### GPS & SOS Flooding
+
+- Continuous GPS sampling at 1Hz (configurable)
+- Emergency broadcast protocol: beacons entire mesh on distress trigger
+- Location telemetry stored locally with encryption
+- Battery-aware sampling throttle for extended operations
+
+### Mission Telemetry Logger
+
+- Event-driven logging: handshake, packet loss, battery, GPS, duress events
+- CSV export format for post-mission analysis
+- Extraction via adb or local file transfer
+- mission_analyzer.py tool for visualization and statistical analysis
+
+### Duress Data Shredder
+
+- PIN entry: hold power button and enter secret sequence
+- Cryptographic overwrite: 7-pass DOD 5220.22-M standard
+- Selectively whitelist core configs (map data, keys) or full wipe
+- Triggers after 10-second countdown (cancellable)
+
+### Fleet Deployment Script (deploy_fleet.sh)
+
+- Automated APK signing and installation across multiple Android devices
+- Over-the-air provisioning of mesh keys and roster
+- Batch firmware updates and configuration rollout
+- Health check and readiness verification post-deployment
+
+---
+
+## Hidden Diagnostics & Engineering Mode
+
+Ghost Net includes a concealed diagnostics interface for advanced troubleshooting and operational monitoring. The interface is accessible via a multi-tap hardware trigger on the device.
+
+**Access Method:**
+Press the volume_up button and power button simultaneously 5 times in rapid succession. Upon successful activation, the diagnostics overlay will display.
+
+**Diagnostics Capabilities:**
+- Live network mesh topology with peer RSSI and hop counts
+- Real-time relay activation and packet transit visualization
+- Encrypted telemetry event stream with raw timestamps
+- Battery drain profiling and thermal monitoring
+- GPS accuracy metrics (dilution of precision, satellite count)
+- Interference profile detection (ambient 2.4GHz saturation)
+- Manual test packet injection for link quality assessment
+- Emergency log export with USB debugging enabled
+
+This interface is intentionally hidden to prevent accidental activation during field operations and to maintain operational security in contested environments.
+
+---
+
+## Field Testing & Mission Analysis
+
+### Tactical Range Testing
+
+Comprehensive field test procedures are documented in [`FIELD_TEST_PROTOCOL.md`](FIELD_TEST_PROTOCOL.md), covering:
+
+- **Phase 1 (Line-of-Sight):** Direct peer-to-peer mesh evaluation with RSSI threshold mapping
+- **Phase 2 (Urban Penetration):** Real-world obstruction and multi-hop relay performance under challenging RF conditions
+- **Signal Degradation Reference:** RSSI performance table (-30 to -100 dBm) with expected packet loss and latency
+- **3-Node Hop Procedure:** Methodology for testing blind relay activation and mesh routing integrity
+- **Environment-Specific Notes:** Indore urban interference mitigation, GPS accuracy expectations, baseline RF profiling
+
+### Mission Data Extraction & Analysis
+
+Post-mission telemetry analysis workflow:
+
+**1. Extract mission telemetry from device:**
 ```
-┌─────────────────────────────────────────┐
-│  Traditional Apps      │   Ghost Net    │
-├────────────────────────┼────────────────┤
-│  Your Phone            │   Your Phone   │
-│       ↓                │       ↕        │
-│  Company Servers  ❌   │   Friend's     │
-│       ↓                │   Phone ✅     │
-│  Friend's Phone        │                │
-└─────────────────────────────────────────┘
-```
-
-**No middleman. No surveillance. Just you and your peers.**
-
----
-
-## ✨ Features
-
-<table>
-<tr>
-<td width="50%" valign="top">
-
-### 🔍 **Auto-Discovery Radar**
-
-![Radar Screen](mockups/screenshot_radar.png)
-
-Instantly finds nearby peers on your Wi-Fi network using UDP broadcasts. No usernames, no passwords, no accounts.
-
-</td>
-<td width="50%" valign="top">
-
-### 💬 **Encrypted Messaging**
-
-![Chat Screen](mockups/screenshot_chat.png)
-
-End-to-end encrypted chat with file transfers. Messages never leave your local network.
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-### ⚙️ **Privacy Controls**
-
-![Settings Screen](mockups/screenshot_settings.png)
-
-Auto-delete messages, Panic Mode to wipe data instantly, multi-language support, and more.
-
-</td>
-<td width="50%" valign="top">
-
-### 🛡️ **Security by Design**
-
-- 🔐 **AES-128 Encryption** (Fernet)
-- 🔑 **Daily Key Rotation**
-- 🧹 **Auto-Delete Messages**
-- 🚨 **Panic Mode** (instant wipe)
-- 🌍 **4 Languages** (EN, ES, HI, ZH)
-- 📱 **Mobile-First Design**
-
-</td>
-</tr>
-</table>
-
----
-
-## 🎬 How It Works
-
-### 3-Step Setup (< 30 seconds)
-
-```mermaid
-graph LR
-    A[1. Connect to Wi-Fi] --> B[2. Open Ghost Net]
-    B --> C[3. Start Chatting]
-    style A fill:#4CAF50
-    style B fill:#4CAF50
-    style C fill:#4CAF50
-```
-
-1. **📶 Connect** - Both devices join the same Wi-Fi network (or create a hotspot)
-2. **👻 Launch** - Open Ghost Net app on both devices
-3. **💬 Chat** - Peers auto-discover in 2-4 seconds. Start messaging!
-
-### Real-World Use Cases
-
-| Scenario | Why Ghost Net? |
-|----------|----------------|
-| 🏢 **Workplace** | Discuss sensitive topics without corporate monitoring |
-| ✈️ **Travel** | Communicate in countries with internet censorship |
-| 🏡 **Home** | Family chat without feeding data to Big Tech |
-| 🎓 **Campus** | Student organizing without admin oversight |
-| 🏕️ **Outdoors** | Mesh communication in areas without cell service |
-| 🔒 **Journalism** | Source protection via airgapped communication |
-
----
-
-## 🚀 Installation
-
-### Option 1: Android APK (Recommended)
-
-```bash
-# Download the latest release
-wget https://github.com/yourusername/Ghost_Net/releases/latest/download/GhostNet_v1.0.0.apk
-
-# Install via ADB
-adb install GhostNet_v1.0.0.apk
-
-# Or transfer to phone and install manually
+adb pull /data/data/com.ghostnet.app/files/mission_telemetry.csv ./telemetry_phase1.csv
 ```
 
-### Option 2: Build from Source
-
-**Desktop (Development):**
-```bash
-git clone https://github.com/yourusername/Ghost_Net.git
-cd Ghost_Net
-pip install -r requirements.txt
-python main.py
+**2. Run mission analyzer for comprehensive breakdown:**
+```
+python3 mission_analyzer.py --input telemetry_phase1.csv --output phase1_analysis.json --format verbose
 ```
 
-**Android (Production):**
-```bash
-# Linux/macOS only (or WSL on Windows)
-pip install buildozer
-buildozer -v android debug
-
-# APK output: bin/ghostnet-1.0.0-arm64-v8a-debug.apk
+**3. Generate visualization plots:**
+```
+python3 mission_analyzer.py --input telemetry_phase1.csv --plot rssi_timeline --output phase1_rssi_chart.png
+python3 mission_analyzer.py --input telemetry_phase1.csv --plot packet_loss_heatmap --output phase1_loss_map.png
+python3 mission_analyzer.py --input telemetry_phase1.csv --plot latency_distribution --output phase1_latency.png
 ```
 
-📖 **Full build guide:** [`DEPLOYMENT.md`](DEPLOYMENT.md)
+The [`mission_analyzer.py`](mission_analyzer.py) tool parses encrypted telemetry logs, validates event authenticity, and produces statistical summaries with geographic correlations.
 
 ---
 
-## 🔐 Security Architecture
+## Installation
 
-### Encryption Stack
+### Option 1: Download Pre-Built APK from GitHub Actions
 
+Latest builds are available in the [Releases](https://github.com/Rhythm-Sanghi/Gost-Net/releases) page or via GitHub Actions artifacts:
+
+1. Navigate to [Actions](https://github.com/Rhythm-Sanghi/Gost-Net/actions)
+2. Select the latest successful build workflow run
+3. Download the `ghost-net-release.apk` artifact
+4. Transfer to Android device (7.0+) via USB
+5. Install: `adb install ghost-net-release.apk`
+
+### Option 2: Build Locally with Deploy Script
+
+**Prerequisites:**
+- Python 3.8+
+- Buildozer 1.4+
+- Android SDK (API 28+)
+- Kivy 2.1+
+
+**Build and Deploy:**
 ```
-┌─────────────────────────────────────────────┐
-│           Application Layer                 │
-│  • User messages & files                    │
-└─────────────────┬───────────────────────────┘
-                  ↓
-┌─────────────────────────────────────────────┐
-│         Encryption Layer                    │
-│  • Fernet (AES-128 + HMAC-SHA256)          │
-│  • Daily rotating keys                      │
-│  • Authenticated encryption                 │
-└─────────────────┬───────────────────────────┘
-                  ↓
-┌─────────────────────────────────────────────┐
-│          Network Layer                      │
-│  • TCP for messages (Port 37021)           │
-│  • UDP for discovery (Port 37020)          │
-│  • Local network only (no internet)        │
-└─────────────────────────────────────────────┘
-```
-
-### What's Protected
-
-✅ **Message Content** - AES-128 symmetric encryption  
-✅ **Message Integrity** - HMAC-SHA256 authentication  
-✅ **Local Network** - No internet exposure  
-✅ **Auto-Cleanup** - Messages auto-delete after 24h (configurable)  
-✅ **Panic Mode** - Instant database wipe on emergency  
-
-### Current Limitations
-
-⚠️ **Shared Secret** - All peers on network use same daily key (date-based)  
-⚠️ **No User Auth** - Username spoofing possible  
-⚠️ **No Forward Secrecy** - Key compromise decrypts old messages  
-
-📋 **Roadmap:** Diffie-Hellman key exchange, device fingerprinting, and per-peer session keys coming in v2.0
-
----
-
-## 📖 Documentation
-
-Comprehensive guides for every use case:
-
-| Document | Description |
-|----------|-------------|
-| [`ARCHITECTURE_REVIEW.md`](ARCHITECTURE_REVIEW.md) | Deep-dive technical analysis |
-| [`FILE_TRANSFER_DOCS.md`](FILE_TRANSFER_DOCS.md) | File sharing protocol & implementation |
-| [`STORAGE_DOCS.md`](STORAGE_DOCS.md) | Encrypted SQLite database schema |
-| [`SETTINGS_DOCS.md`](SETTINGS_DOCS.md) | Configuration & privacy controls |
-| [`LOCALIZATION_GUIDE.md`](LOCALIZATION_GUIDE.md) | Multi-language integration guide |
-| [`DEPLOYMENT.md`](DEPLOYMENT.md) | Build & deployment instructions |
-| [`RELEASE_NOTES.md`](RELEASE_NOTES.md) | Version history & changelog |
-
----
-
-## 🛠️ Technology Stack
-
-<div align="center">
-
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| **UI** | [KivyMD](https://github.com/kivymd/KivyMD) | Material Design interface |
-| **Framework** | [Kivy](https://kivy.org/) | Cross-platform Python framework |
-| **Encryption** | [Cryptography](https://cryptography.io/) | Fernet symmetric encryption |
-| **Storage** | [SQLite](https://www.sqlite.org/) | Encrypted message persistence |
-| **Network** | Python `socket` | UDP discovery + TCP messaging |
-| **Build** | [Buildozer](https://github.com/kivy/buildozer) | Android APK packaging |
-
-</div>
-
----
-
-## 🧪 Testing
-
-### Automated Test Suite
-
-```bash
-# Run full test suite
-python test_network.py
-
-# Test in two terminals (simulates 2 peers)
-python test_network.py Alice
-python test_network.py Bob  # In another terminal
+chmod +x deploy_fleet.sh
+./deploy_fleet.sh --build --sign --install
 ```
 
-**Test Coverage:**
-- ✅ Engine initialization & thread spawning
-- ✅ Encryption/decryption with daily key rotation
-- ✅ UDP peer discovery & timeout handling
-- ✅ TCP message delivery
-- ✅ File transfer protocol
-- ✅ Database persistence & cleanup
-- ✅ Clean shutdown
-
-### Manual Testing Checklist
-
-- [ ] **Discovery Test** - Both devices find each other within 5 seconds
-- [ ] **Message Test** - Send 10 messages in both directions
-- [ ] **File Test** - Send images, PDFs, videos
-- [ ] **Network Disruption** - Disable Wi-Fi, re-enable, verify reconnection
-- [ ] **Panic Mode** - Activate and verify database wipe
-- [ ] **Auto-Delete** - Wait 24h, verify messages removed
-- [ ] **Multi-Language** - Switch languages, verify UI updates
-
----
-
-## 📊 Performance Metrics
-
-### Network Efficiency
-
-| Metric | Value | Notes |
-|--------|-------|-------|
-| **Idle Bandwidth** | ~50 bytes/2s | UDP beacons per peer |
-| **Message Size** | 100-500 bytes | Encrypted payload |
-| **Total Usage** | < 1 KB/s | 10 peers, moderate messaging |
-| **Discovery Time** | 2-4 seconds | Typical on local Wi-Fi |
-| **Peer Timeout** | 10 seconds | Inactivity threshold |
-
-### Resource Usage
-
-| Resource | Usage | Impact |
-|----------|-------|--------|
-| **RAM** | 50-80 MB | Base app footprint |
-| **Battery** | < 5% per hour | Estimated drain |
-| **Storage** | ~500 KB | App binary + database |
-| **CPU** | Minimal | Encryption < 1ms per message |
-
----
-
-## 🎨 Customization
-
-### Themes & Colors
-
-Edit [`main.py`](main.py:286):
-
-```python
-self.theme_cls.theme_style = "Dark"  # "Light" or "Dark"
-self.theme_cls.primary_palette = "Green"  # Any Material color
+For multi-device deployment:
+```
+./deploy_fleet.sh --build --sign --install --devices <device_serial_1> <device_serial_2>
 ```
 
-### Network Ports
-
-Edit [`network.py`](network.py:15):
-
-```python
-UDP_PORT = 37020  # Discovery broadcasts
-TCP_PORT = 37021  # Message transfer
+**Offline Build (without GitHub Actions):**
+```
+buildozer android release
 ```
 
-### Auto-Delete Timing
-
-Edit [`config.py`](config.py:12) or change in Settings screen:
-
-```python
-'cleanup_hours': 24  # Hours before auto-delete
-```
-
-### Add New Languages
-
-See [`LOCALIZATION_GUIDE.md`](LOCALIZATION_GUIDE.md) for step-by-step instructions.
+APK will be generated at `bin/ghost-net-<version>-release-unsigned.apk`.
 
 ---
 
-## 🐛 Troubleshooting
+## System Requirements
 
-<details>
-<summary><b>❌ Peers Not Found</b></summary>
-
-**Symptoms:** Radar shows "No peers found" after 10+ seconds
-
-**Solutions:**
-1. ✅ Verify both devices on **same Wi-Fi network**
-2. ✅ Check router allows UDP multicast (some routers block it)
-3. ✅ Try mobile hotspot instead of router
-4. ✅ Disable VPN on both devices
-5. ✅ Check firewall allows UDP port 37020
-6. ✅ Grant network permissions: Settings → Apps → Ghost Net → Permissions
-
-</details>
-
-<details>
-<summary><b>❌ Messages Not Sending</b></summary>
-
-**Symptoms:** Send button works but messages don't arrive
-
-**Solutions:**
-1. ✅ Verify peer still in peer list (may have timed out)
-2. ✅ Check firewall allows TCP port 37021
-3. ✅ Restart both apps to resync encryption keys
-4. ✅ Check `adb logcat` for error details (Android)
-
-</details>
-
-<details>
-<summary><b>❌ Encryption Errors</b></summary>
-
-**Symptoms:** Console shows "Decryption failed"
-
-**Solutions:**
-1. ✅ Ensure both devices have **synchronized system time**
-2. ✅ Update both apps to same version
-3. ✅ Restart apps to regenerate daily key
-
-</details>
-
-<details>
-<summary><b>❌ High Battery Drain</b></summary>
-
-**Solutions:**
-1. ✅ Increase beacon interval in [`network.py`](network.py:16): `BEACON_INTERVAL = 5`
-2. ✅ Enable Android battery optimization for Ghost Net
-3. ✅ Close app when not in use (no background service yet)
-
-</details>
-
-📖 **More help:** Open an issue on GitHub or check [existing issues](https://github.com/yourusername/Ghost_Net/issues)
+- **Android:** 7.0 (API 24) or higher
+- **RAM:** Minimum 512 MB (2 GB recommended)
+- **Storage:** 50 MB free space (plus map tile cache, ~100 MB per region)
+- **Connectivity:** Bluetooth 4.0+, WiFi Direct support
+- **GPS:** Hardware or network-based (for location telemetry)
 
 ---
 
-## 🗺️ Roadmap
+## Documentation
 
-### v1.0.0 (Current) ✅
-- [x] P2P messaging over local Wi-Fi
-- [x] End-to-end encryption (Fernet)
-- [x] File transfers (images, documents)
-- [x] Encrypted message persistence
-- [x] Auto-delete messages
-- [x] Panic Mode (instant wipe)
-- [x] Multi-language support (4 languages)
-- [x] Material Design UI
-
-### v1.1.0 (Next Release) 🚧
-- [ ] Diffie-Hellman key exchange (per-peer keys)
-- [ ] Device fingerprinting (anti-spoofing)
-- [ ] Group chats (multi-peer broadcast)
-- [ ] Voice messages (audio recording)
-- [ ] Dark theme customization
-- [ ] Background service (persistent discovery)
-
-### v2.0.0 (Future) 🔮
-- [ ] Bluetooth mesh networking (no Wi-Fi required)
-- [ ] Desktop apps (Windows, macOS, Linux)
-- [ ] QR code peer verification
-- [ ] Disappearing messages (Signal-style)
-- [ ] Screen security (block screenshots)
-- [ ] iOS version (React Native port?)
-
-**🗳️ Vote on features:** [GitHub Discussions](https://github.com/yourusername/Ghost_Net/discussions)
+- **[FIELD_TEST_PROTOCOL.md](FIELD_TEST_PROTOCOL.md)** - Tactical range testing procedures and environmental adaptation guide
+- **[E2EE_IMPLEMENTATION_GUIDE.md](E2EE_IMPLEMENTATION_GUIDE.md)** - Cryptographic design and key derivation details
+- **[MESH_NETWORK_IMPLEMENTATION.md](MESH_NETWORK_IMPLEMENTATION.md)** - Routing protocol, blind relay mechanics, and topology management
+- **[PTT_VOICE_MESSAGING_IMPLEMENTATION.md](PTT_VOICE_MESSAGING_IMPLEMENTATION.md)** - Audio codec, streaming, and mesh delivery
+- **[TACTICAL_MAP_IMPLEMENTATION.md](TACTICAL_MAP_IMPLEMENTATION.md)** - Offline map caching and GPS integration
+- **[TELEMETRY_INTEGRATION.md](TELEMETRY_INTEGRATION.md)** - Event logging and mission data extraction
+- **[PRODUCTION_RELEASE_BUILD_GUIDE.md](PRODUCTION_RELEASE_BUILD_GUIDE.md)** - Build pipeline, signing, and GitHub Actions configuration
 
 ---
 
-## 🤝 Contributing
+## Security Considerations
 
-Ghost Net is **100% open-source** and welcomes contributions!
+Ghost Net is engineered for tactical deployments where security is paramount. Key design decisions:
 
-### How to Contribute
+- **Encryption at Rest:** SQLite database encrypted with AES-256-GCM
+- **Encryption in Transit:** All mesh traffic authenticated with per-message encryption
+- **Key Management:** ECDH ephemeral keys, HKDF key derivation, no plaintext key storage
+- **Operational Security:** Duress shredder, log suppression, minimal persistent state
+- **Forensic Hardening:** Cryptographic cache clearing, secure deletion standards (DOD 5220.22-M)
 
-1. **🐛 Report Bugs** - Open an issue with reproduction steps
-2. **💡 Suggest Features** - Propose enhancements via discussions
-3. **🔧 Submit PRs** - Fork, code, test, and submit pull requests
-4. **📖 Improve Docs** - Fix typos, add examples, clarify instructions
-5. **🌍 Translate** - Add new languages to [`assets/locales/`](assets/locales/)
-6. **⭐ Star the Repo** - Help others discover Ghost Net!
-
-### Development Setup
-
-```bash
-# Clone and setup
-git clone https://github.com/yourusername/Ghost_Net.git
-cd Ghost_Net
-python -m venv venv
-source venv/bin/activate  # or `venv\Scripts\activate` on Windows
-pip install -r requirements.txt
-
-# Run tests
-python test_network.py
-
-# Start development server
-python main.py
-```
-
-### Code Standards
-
-- ✅ Follow PEP 8 style guide
-- ✅ Add type hints for new functions
-- ✅ Write docstrings for public methods
-- ✅ Test on both desktop and Android
-- ✅ Update relevant documentation
-
-📖 **Full guidelines:** [`CONTRIBUTING.md`](CONTRIBUTING.md)
+**Threat Model:** Designed to resist passive RF monitoring, active eavesdropping, and endpoint compromise with limited forensic recovery.
 
 ---
 
-## 📜 License
+## Development & Contributing
 
-Ghost Net is released under the **MIT License**.
-
-```
-Copyright (c) 2026 Ghost Net Contributors
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-[Full MIT License text...]
-```
-
-**TL;DR:** Use, modify, and distribute freely. See [`LICENSE`](LICENSE) for details.
+This is a **closed-source tactical project**. Contributions are by invitation only. For security vulnerabilities, contact the team directly rather than opening public issues.
 
 ---
 
-## 🌟 Star History
+## License
 
-[![Star History Chart](https://api.star-history.com/svg?repos=yourusername/Ghost_Net&type=Date)](https://star-history.com/#yourusername/Ghost_Net&Date)
-
----
-
-## 🙏 Acknowledgments
-
-Built with these incredible open-source projects:
-
-- **[Kivy](https://kivy.org/)** - Cross-platform Python framework
-- **[KivyMD](https://github.com/kivymd/KivyMD)** - Material Design components
-- **[Cryptography.io](https://cryptography.io/)** - Modern encryption library
-- **[Buildozer](https://github.com/kivy/buildozer)** - Android packaging tool
-
-Special thanks to:
-- 💚 **Early testers** who stress-tested the network engine
-- 🌍 **Translators** who made Ghost Net multilingual
-- 🔐 **Security researchers** who reviewed the encryption design
-- ❤️ **Open-source community** for inspiration and support
+Ghost Net v1.0 – Proprietary Defense Technology. Unauthorized distribution or modification is prohibited.
 
 ---
 
-## 📞 Contact & Support
+## Deployment Status
 
-<div align="center">
+| Component | Status | Version |
+|---|---|---|
+| Core Mesh | ✓ Production | 1.0 |
+| E2EE Encryption | ✓ Production | 1.0 |
+| PTT Audio | ✓ Production | 1.0 |
+| Tactical Maps | ✓ Production | 1.0 |
+| Mission Telemetry | ✓ Production | 1.0 |
+| Duress Mechanisms | ✓ Production | 1.0 |
+| Fleet Deployment | ✓ Production | 1.0 |
+| GitHub Actions CI/CD | ✓ Active | — |
 
-### Need Help?
-
-[![GitHub Issues](https://img.shields.io/github/issues/yourusername/Ghost_Net?style=for-the-badge)](https://github.com/yourusername/Ghost_Net/issues)
-[![GitHub Discussions](https://img.shields.io/github/discussions/yourusername/Ghost_Net?style=for-the-badge)](https://github.com/yourusername/Ghost_Net/discussions)
-
-### Stay Connected
-
-[![Twitter](https://img.shields.io/badge/Twitter-Follow-1DA1F2?style=for-the-badge&logo=twitter)](https://twitter.com/ghostnet_app)
-[![Reddit](https://img.shields.io/badge/Reddit-Join-FF4500?style=for-the-badge&logo=reddit)](https://reddit.com/r/GhostNetApp)
-[![Discord](https://img.shields.io/badge/Discord-Chat-5865F2?style=for-the-badge&logo=discord)](https://discord.gg/ghostnet)
-
-</div>
-
----
-
-<div align="center">
-
-## 🎯 Why Ghost Net Exists
-
-> **"Privacy is not about having something to hide. Privacy is about having something to protect."**
-
-In an era of mass surveillance, Ghost Net is a statement:
-
-**Your conversations belong to YOU, not corporations or governments.**
-
----
-
-### 🚀 Ready to Go Ghost?
-
-[![Download APK](https://img.shields.io/badge/Download-APK-4CAF50?style=for-the-badge&logo=android)](https://github.com/yourusername/Ghost_Net/releases/latest)
-[![Build from Source](https://img.shields.io/badge/Build-From%20Source-blue?style=for-the-badge&logo=github)](DEPLOYMENT.md)
-[![Read Docs](https://img.shields.io/badge/Read-Documentation-orange?style=for-the-badge&logo=read-the-docs)](ARCHITECTURE_REVIEW.md)
-
----
-
-**Built with ❤️ by privacy advocates, for privacy advocates**
-
-*Ghost Net v1.0.0 - Message freely, locally, securely* 👻
-
-⭐ **Star this repo if you believe in surveillance-free communication!** ⭐
-
-</div>
+Built with Kivy, Python 3.8+, and cryptographic libraries (cryptography.io).

@@ -82,8 +82,9 @@ try:
         from kivymd.uix.textfield import MDTextFieldHintText, MDTextFieldHelperText
     except ImportError:
         MDButtonText = MDLabel
-        MDTextFieldHintText = lambda **kwargs: Widget()
-        MDTextFieldHelperText = lambda **kwargs: Widget()
+        # Use a deferred lambda that accesses Widget only at call time (Widget is imported later)
+        MDTextFieldHintText = lambda **kwargs: KivyWidget(**{k: v for k, v in kwargs.items() if k != 'text'})
+        MDTextFieldHelperText = lambda **kwargs: KivyWidget(**{k: v for k, v in kwargs.items() if k != 'text'})
     
     try:
         from kivymd.uix.dialog import MDDialog, MDDialogHeadlineText, MDDialogContentContainer, MDDialogButtonContainer
@@ -131,7 +132,6 @@ from gps_manager import get_gps_manager
 from auth_manager import AuthenticationManager
 from diagnostics import get_diagnostics, encrypt_telemetry_file, copy_to_downloads
 from telemetry_logger import get_telemetry_logger
-import threading
 
 try:
     from kivy_garden.mapview import MapView, MapMarker
@@ -214,7 +214,7 @@ class LockScreen(MDScreen):
         
         self.add_widget(layout)
     
-    def on_pin_submit(self):
+    def on_pin_submit(self, *args):
         pin = self.pin_field.text.strip()
         
         if not pin:
@@ -298,7 +298,7 @@ class MapMarkerPopup(MapMarker if MAPVIEW_AVAILABLE else object):
             
             self.bind(on_release=self.on_marker_release)
     
-    def on_marker_release(self):
+    def on_marker_release(self, *args):
         app = MDApp.get_running_app()
         if app and hasattr(app.root, 'get_screen'):
             try:
@@ -1465,7 +1465,9 @@ class RadarScreen(MDScreen):
                 if not hasattr(self, 'alert_dialog') or not self.alert_dialog:
                     break
                 
-                alert_file = os.path.join(self.gps_manager.recording_dir if hasattr(self.gps_manager, 'recording_dir') else '/tmp', 'alert_tone.wav')
+                import tempfile
+                alert_dir = self.gps_manager.recording_dir if hasattr(self.gps_manager, 'recording_dir') else tempfile.gettempdir()
+                alert_file = os.path.join(alert_dir, 'alert_tone.wav')
                 with open(alert_file, 'wb') as f:
                     f.write(b'ALERT_TONE_DATA')
                 
@@ -2025,7 +2027,8 @@ class ChatScreen(MDScreen):
                     self.messages_list.add_widget(bubble)
                 elif msg.get('content_type') == 'file' or msg.get('message_type') == 'FILE':
                     filename = msg['content']
-                    filepath = msg.get('filepath')
+                    # DatabaseManager uses 'file_path'; PersistenceDatabase has no filepath
+                    filepath = msg.get('file_path') or msg.get('filepath')
                     
                     audio_exts = ['.m4a', '.amr', '.wav', '.mp3', '.ogg', '.aac']
                     is_audio = any(filename.lower().endswith(ext) for ext in audio_exts)
@@ -2678,34 +2681,43 @@ class SettingsScreen(MDScreen):
             )
             second_dialog.open()
         
-        # First confirmation
-        dialog = MDDialog(
-            MDDialogHeadlineText(text="⚠️ Activate Panic Mode?"),
-            MDDialogContentContainer(
-                MDLabel(
-                    text="This will delete ALL data:\n• All messages\n• All files\n• Encryption keys\n• App configuration\n\nThe app will exit immediately.",
-                    halign='center',
-                    font_style='Body',
-                    role='large'
+        # First confirmation — use a list to hold the dialog reference so the
+        # Cancel lambda can capture it before the variable is fully assigned
+        # (avoids the "referenced before assignment" forward-reference bug)
+        dialog_holder = [None]
+
+        def _make_first_dialog():
+            d = MDDialog(
+                MDDialogHeadlineText(text="⚠️ Activate Panic Mode?"),
+                MDDialogContentContainer(
+                    MDLabel(
+                        text="This will delete ALL data:\n• All messages\n• All files\n• Encryption keys\n• App configuration\n\nThe app will exit immediately.",
+                        halign='center',
+                        font_style='Body',
+                        role='large'
+                    ),
+                    orientation="vertical"
                 ),
-                orientation="vertical"
-            ),
-            MDDialogButtonContainer(
-                MDButton(
-                    MDButtonText(text="Cancel"),
-                    style="text",
-                    on_release=lambda x: dialog.dismiss()
-                ),
-                MDButton(
-                    MDButtonText(text="Continue"),
-                    style="elevated",
-                    theme_bg_color='Custom',
-                    md_bg_color=(0.8, 0.5, 0.2, 1),
-                    on_release=lambda x: confirm_panic(dialog)
-                ),
-                spacing=dp(8)
+                MDDialogButtonContainer(
+                    MDButton(
+                        MDButtonText(text="Cancel"),
+                        style="text",
+                        on_release=lambda x: dialog_holder[0].dismiss()
+                    ),
+                    MDButton(
+                        MDButtonText(text="Continue"),
+                        style="elevated",
+                        theme_bg_color='Custom',
+                        md_bg_color=(0.8, 0.5, 0.2, 1),
+                        on_release=lambda x: confirm_panic(dialog_holder[0])
+                    ),
+                    spacing=dp(8)
+                )
             )
-        )
+            dialog_holder[0] = d
+            return d
+
+        dialog = _make_first_dialog()
         dialog.open()
     
     def nuke_data(self, dialog):
@@ -2747,8 +2759,11 @@ class SettingsScreen(MDScreen):
         
         # Delete config
         try:
-            app.config.delete_config()
-            print("[PANIC MODE] Config deleted")
+            if app and app.config:
+                app.config.delete_config()
+                print("[PANIC MODE] Config deleted")
+            else:
+                print("[PANIC MODE] Config not available to delete")
         except Exception as e:
             print(f"[PANIC MODE] Config deletion error: {e}")
         
@@ -2978,8 +2993,9 @@ class GhostNetApp(MDApp):
             
             print(f"[GhostNet] App started as '{self.username}'")
             
+            # Transition to radar (main screen) after successful boot
             Clock.schedule_once(
-                lambda dt: setattr(self.root, 'current', 'boot'),
+                lambda dt: setattr(self.root, 'current', 'radar'),
                 0
             )
             
@@ -3152,7 +3168,7 @@ class GhostNetApp(MDApp):
         
         # Show notification if not on chat screen
         if self.root.current != 'chat':
-            username = self.engine.get_peer_username(sender_ip)
+            username = self.engine.get_peer_username(sender_ip) if self.engine else sender_ip
             print(f"[Notification] New message from {username}")
     
     def handle_file_received(self, sender_ip, filename, filepath, timestamp):
@@ -3170,7 +3186,7 @@ class GhostNetApp(MDApp):
         
         # Show notification if not on chat screen
         if self.root.current != 'chat':
-            username = self.engine.get_peer_username(sender_ip)
+            username = self.engine.get_peer_username(sender_ip) if self.engine else sender_ip
             print(f"[Notification] File received from {username}: {filename}")
     
     def handle_sos_received(self, sender_name: str, latitude: float, longitude: float, message: str, sos_id: str):

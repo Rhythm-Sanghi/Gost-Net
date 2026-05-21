@@ -386,39 +386,46 @@ class PersistenceDatabase:
                     except:
                         pass
 
-   def shred_everything(self) -> bool:
-       with self.db_lock:
-           try:
-               conn = sqlite3.connect(self.db_path, timeout=10.0)
-               cursor = conn.cursor()
-               
-               cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-               tables = cursor.fetchall()
-               
-               for table in tables:
-                   table_name = table[0]
-                   try:
-                       cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
-                   except Exception as e:
-                       print(f"[PersistenceDatabase] Error dropping table {table_name}: {e}")
-               
-               cursor.execute("VACUUM")
-               conn.commit()
-               conn.close()
-               
-               print("[PersistenceDatabase] Database shredded successfully")
-               return True
-               
-           except Exception as e:
-               print(f"[PersistenceDatabase] Error during database shredding: {e}")
-               return False
-           finally:
-               try:
-                   if os.path.exists(self.db_path):
-                       for _ in range(3):
-                           with open(self.db_path, 'r+b') as f:
-                               size = os.path.getsize(self.db_path)
-                               f.seek(0)
-                               f.write(os.urandom(size))
-               except Exception as e:
-                   print(f"[PersistenceDatabase] Error overwriting database file: {e}")
+    def shred_everything(self) -> bool:
+        with self.db_lock:
+            conn = None
+            try:
+                conn = sqlite3.connect(self.db_path, timeout=10.0)
+                cursor = conn.cursor()
+                
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                tables = cursor.fetchall()
+                
+                for table in tables:
+                    table_name = table[0]
+                    try:
+                        cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
+                    except Exception as e:
+                        print(f"[PersistenceDatabase] Error dropping table {table_name}: {e}")
+                
+                cursor.execute("VACUUM")
+                conn.commit()
+                conn.close()
+                conn = None
+                
+                print("[PersistenceDatabase] Database shredded successfully")
+                return True
+                
+            except Exception as e:
+                print(f"[PersistenceDatabase] Error during database shredding: {e}")
+                return False
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+                try:
+                    if os.path.exists(self.db_path):
+                        for _ in range(3):
+                            with open(self.db_path, 'r+b') as f:
+                                size = os.path.getsize(self.db_path)
+                                f.seek(0)
+                                f.write(os.urandom(size))
+                except Exception as e:
+                    print(f"[PersistenceDatabase] Error overwriting database file: {e}")

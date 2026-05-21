@@ -4,7 +4,7 @@ import asyncio
 import time
 import threading
 
-_platform = kivy_platform()
+_platform = kivy_platform  # kivy.utils.platform is a string, not a callable
 _is_android = (_platform == 'android')
 
 class MockWiFiDirect:

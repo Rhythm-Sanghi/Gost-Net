@@ -601,8 +601,13 @@ class GhostEngine:
                 self.udp_socket.sendto(message, ('<broadcast>', self.UDP_PORT))
                 # print(f"[Beacon] Broadcasted: {beacon}")
                 
+            except (OSError, AttributeError):
+                # Socket was closed by stop() — suppress error during clean shutdown
+                if self.running:
+                    print(f"[Beacon] Socket error during shutdown")
             except Exception as e:
-                print(f"[Beacon] Error broadcasting: {e}")
+                if self.running:
+                    print(f"[Beacon] Error broadcasting: {e}")
             
             time.sleep(self.BEACON_INTERVAL)
     
@@ -670,6 +675,10 @@ class GhostEngine:
                 
             except socket.timeout:
                 continue
+            except (OSError, AttributeError):
+                # Socket was closed by stop() — suppress error during clean shutdown
+                if self.running:
+                    print(f"[Listener] Socket error during shutdown")
             except json.JSONDecodeError:
                 continue
             except Exception as e:

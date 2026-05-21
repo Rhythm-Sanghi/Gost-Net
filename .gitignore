@@ -1,0 +1,111 @@
+# =============================================================================
+# Ghost Net — .gitignore
+# Python / Kivy / Android / Buildozer project
+# =============================================================================
+
+# ─── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ─── Virtual Environments ────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+.env
+.env.*
+
+# ─── Distribution / Packaging ────────────────────────────────────────────────
+dist/
+build/
+*.egg-info/
+*.egg
+MANIFEST
+*.whl
+
+# ─── Testing & Coverage ──────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.lcov
+nosetests.xml
+test-results/
+test_settings.json
+
+# ─── Kivy Runtime Artifacts ──────────────────────────────────────────────────
+*.pyc
+kivy-garden/
+.kivy/
+*.kv~
+
+# ─── Buildozer / Android Build ───────────────────────────────────────────────
+.buildozer/
+bin/
+*.apk
+*.aab
+*.ipa
+*.so
+*.jks
+*.keystore
+
+# ─── Secrets & Cryptographic Keys ────────────────────────────────────────────
+secret.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.cer
+ghostnet.db
+ghostnet_persistence.db
+
+# ─── User Data & Runtime State ───────────────────────────────────────────────
+downloads/
+recordings/
+*.log
+*.telemetry
+settings.json
+ghostnet_settings.json
+
+# ─── IDEs & Editors ──────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.swp
+*.swo
+*~
+
+# ─── OS-Generated Files ──────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ─── Scratch / Internal AI Artifacts ─────────────────────────────────────────
+plans/
+fix_indent.py
+generate_mockups.py
+
+# ─── CI Secrets (keep guide, but never real values) ──────────────────────────
+CI_SECRETS_GUIDE.txt
+
+# ─── Temp Files ──────────────────────────────────────────────────────────────
+*.tmp
+*.bak
+*.orig
+alert_tone.wav
