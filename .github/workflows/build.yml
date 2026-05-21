@@ -120,11 +120,6 @@ jobs:
         cat > ~/.buildozer/cython_directives.txt << 'EOF'
         language_level=3
         EOF
-        
-    - name: Generate app assets
-      run: |
-        python create_assets.py
-        
     - name: Check for release secrets
       id: check_secrets
       run: |
