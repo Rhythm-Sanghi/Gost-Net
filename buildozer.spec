@@ -8,9 +8,12 @@ package.domain = org.ghostnet
 
 source.dir = .
 
-source.include_exts = py,png,jpg,kv,atlas
+source.include_exts = py,png,jpg,kv,atlas,json
 
-source.exclude_dirs = tests,test,mockups,.git,.github,.vscode,.idea,__pycache__,*.egg-info,build,dist
+# Include the src/ package directory
+source.include_dirs = src
+
+source.exclude_dirs = tests,docs,scripts,assets/mockups,assets/web,.git,.github,.vscode,.idea,__pycache__,*.egg-info,build,dist
 source.exclude_patterns = *.orig,*.pyc,*.pyo,*~,*.swp,.DS_Store,*badsyntax*.py,test_*.py
 
 version = 1.0.0

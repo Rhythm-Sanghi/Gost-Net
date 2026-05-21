@@ -123,6 +123,9 @@ import platform
 import sys
 import time
 
+# Add src/ directory to path so all app modules can be imported by name
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
+
 from network import GhostEngine
 from database import PersistenceDatabase
 from config import get_config

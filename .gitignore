@@ -98,11 +98,14 @@ desktop.ini
 
 # ─── Scratch / Internal AI Artifacts ─────────────────────────────────────────
 plans/
+mockups/
+web/
 fix_indent.py
 generate_mockups.py
 
 # ─── CI Secrets (keep guide, but never real values) ──────────────────────────
 CI_SECRETS_GUIDE.txt
+MARKETING.txt
 
 # ─── Temp Files ──────────────────────────────────────────────────────────────
 *.tmp

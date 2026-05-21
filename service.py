@@ -6,10 +6,13 @@ import sys
 from datetime import datetime
 from typing import Optional, Callable, Dict
 
+# Add src/ to path so app modules (database, security, etc.) can be imported
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
+
 from kivy.utils import platform as kivy_platform
 from android.runnable import run_on_ui_thread
 
-_is_android = (kivy_platform() == 'android')
+_is_android = (kivy_platform == 'android')  # kivy_platform is a string, not callable
 
 if _is_android:
     from jnius import autoclass, cast
