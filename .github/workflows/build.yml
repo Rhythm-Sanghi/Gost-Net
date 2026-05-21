@@ -140,6 +140,8 @@ jobs:
         ANDROID_SDK_ROOT: /home/runner/android-sdk
         ANDROID_HOME: /home/runner/android-sdk
         ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/25.1.8937393
+        ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/25.1.8937393
+        ANDROID_NDK: /usr/local/lib/android/sdk/ndk/25.1.8937393
         ANDROIDSDK: /home/runner/android-sdk
         ANDROIDNDK: /usr/local/lib/android/sdk/ndk/25.1.8937393
         ANDROIDAPI: 33
@@ -156,6 +158,8 @@ jobs:
         ANDROID_SDK_ROOT: /home/runner/android-sdk
         ANDROID_HOME: /home/runner/android-sdk
         ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/25.1.8937393
+        ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/25.1.8937393
+        ANDROID_NDK: /usr/local/lib/android/sdk/ndk/25.1.8937393
         ANDROIDSDK: /home/runner/android-sdk
         ANDROIDNDK: /usr/local/lib/android/sdk/ndk/25.1.8937393
         ANDROIDAPI: 33
