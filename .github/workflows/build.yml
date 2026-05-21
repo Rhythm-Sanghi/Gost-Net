@@ -83,13 +83,9 @@ jobs:
 
     - name: Setup Android SDK Path for Buildozer
       run: |
-        mkdir -p $HOME/android-sdk
-        ln -s $ANDROID_HOME/licenses $HOME/android-sdk/licenses
-        ln -s $ANDROID_HOME/cmdline-tools/latest $HOME/android-sdk/tools
-        ln -s $ANDROID_HOME/platform-tools $HOME/android-sdk/platform-tools
-        ls -l $HOME/android-sdk/tools/bin/sdkmanager
-        yes | $HOME/android-sdk/tools/bin/sdkmanager --sdk_root=$HOME/android-sdk --licenses || true
-        yes | $HOME/android-sdk/tools/bin/sdkmanager --sdk_root=$HOME/android-sdk "platforms;android-33" "build-tools;33.0.2"
+        sudo chown -R runner:runner /usr/local/lib/android/sdk
+        yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --sdk_root=/usr/local/lib/android/sdk --licenses || true
+        yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --sdk_root=/usr/local/lib/android/sdk "platforms;android-33" "build-tools;33.0.2"
         
     - name: Cache Buildozer directory
       uses: actions/cache@v3
@@ -139,12 +135,12 @@ jobs:
     - name: Build debug APK
       if: steps.check_secrets.outputs.has_secrets == 'false'
       env:
-        ANDROID_SDK_ROOT: /home/runner/android-sdk
-        ANDROID_HOME: /home/runner/android-sdk
+        ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+        ANDROID_HOME: /usr/local/lib/android/sdk
         ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/25.1.8937393
         ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/25.1.8937393
         ANDROID_NDK: /usr/local/lib/android/sdk/ndk/25.1.8937393
-        ANDROIDSDK: /home/runner/android-sdk
+        ANDROIDSDK: /usr/local/lib/android/sdk
         ANDROIDNDK: /usr/local/lib/android/sdk/ndk/25.1.8937393
         ANDROIDAPI: 33
         ANDROIDMINAPI: 21
@@ -157,12 +153,12 @@ jobs:
         KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        ANDROID_SDK_ROOT: /home/runner/android-sdk
-        ANDROID_HOME: /home/runner/android-sdk
+        ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+        ANDROID_HOME: /usr/local/lib/android/sdk
         ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/25.1.8937393
         ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/25.1.8937393
         ANDROID_NDK: /usr/local/lib/android/sdk/ndk/25.1.8937393
-        ANDROIDSDK: /home/runner/android-sdk
+        ANDROIDSDK: /usr/local/lib/android/sdk
         ANDROIDNDK: /usr/local/lib/android/sdk/ndk/25.1.8937393
         ANDROIDAPI: 33
         ANDROIDMINAPI: 21

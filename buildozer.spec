@@ -46,7 +46,7 @@ android.minapi = 21
 
 android.ndk = 25b
 
-android.sdk_path = /home/runner/android-sdk
+android.sdk_path = /usr/local/lib/android/sdk
 
 android.ndk_path = /usr/local/lib/android/sdk/ndk/25.1.8937393
 
