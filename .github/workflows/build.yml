@@ -168,10 +168,10 @@ jobs:
         ANDROIDAPI: 33
         ANDROIDMINAPI: 21
         MAKEFLAGS: -j2
-        CCACHE_DIR: ~/.ccache
+        CCACHE_DIR: /home/runner/.ccache
         CCACHE_MAXSIZE: 1G
       run: |
-        buildozer android debug
+        buildozer -v android debug > buildozer.log 2>&1 || (tail -n 2000 buildozer.log && exit 1)
         
     - name: Build release APK
       if: steps.check_secrets.outputs.has_secrets == 'true'
@@ -189,10 +189,10 @@ jobs:
         ANDROIDAPI: 33
         ANDROIDMINAPI: 21
         MAKEFLAGS: -j2
-        CCACHE_DIR: ~/.ccache
+        CCACHE_DIR: /home/runner/.ccache
         CCACHE_MAXSIZE: 1G
       run: |
-        buildozer android release
+        buildozer -v android release > buildozer.log 2>&1 || (tail -n 2000 buildozer.log && exit 1)
         
     - name: Sign release APK
       if: steps.check_secrets.outputs.has_secrets == 'true'
@@ -229,6 +229,15 @@ jobs:
         name: ghostnet-apk-${{ github.run_number }}
         path: ${{ steps.apk_name.outputs.apk_path }}
         retention-days: 30
+
+    - name: Upload Buildozer log artifact
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: buildozer-log-${{ github.run_number }}
+        path: buildozer.log
+        retention-days: 7
+        if-no-files-found: ignore
         
     - name: Generate build report
       if: always()
