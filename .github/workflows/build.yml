@@ -51,7 +51,8 @@ jobs:
           libssl-dev \
           python3-dev \
           python3-pip \
-          ant
+          ant \
+          ccache
           
     - name: Install Rust toolchain for Android cross-compilation
       uses: dtolnay/rust-toolchain@stable
@@ -63,23 +64,27 @@ jobs:
         echo "_JAVA_OPTIONS=-Xms512m -Xmx2048m" >> $GITHUB_ENV
         echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
 
-    - name: Cache NDK download
-      uses: actions/cache@v3
+    - name: Setup Android SDK Path permissions
+      run: |
+        sudo mkdir -p /usr/local/lib/android/sdk/ndk
+        sudo chown -R runner:runner /usr/local/lib/android/sdk
+
+    - name: Cache Android NDK
+      id: cache-ndk
+      uses: actions/cache@v4
       with:
-        path: /tmp/android-ndk-r25b-linux.zip
-        key: ndk-r25b-linux-${{ hashFiles('buildozer.spec') }}
-        restore-keys: |
-          ndk-r25b-linux-
+        path: /usr/local/lib/android/sdk/ndk/25.1.8937393
+        key: ${{ runner.os }}-ndk-25.1.8937393
 
     - name: Download and extract Android NDK r25b
+      if: steps.cache-ndk.outputs.cache-hit != 'true'
       run: |
         if [ ! -f /tmp/android-ndk-r25b-linux.zip ]; then
           cd /tmp
           wget --quiet https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
         fi
-        mkdir -p /usr/local/lib/android/sdk/ndk
         unzip -q /tmp/android-ndk-r25b-linux.zip -d /tmp
-        sudo mv /tmp/android-ndk-r25b /usr/local/lib/android/sdk/ndk/25.1.8937393
+        mv /tmp/android-ndk-r25b /usr/local/lib/android/sdk/ndk/25.1.8937393
 
     - name: Setup Android SDK Path for Buildozer
       run: |
@@ -89,7 +94,7 @@ jobs:
         yes | /usr/local/lib/android/sdk/tools/bin/sdkmanager --sdk_root=/usr/local/lib/android/sdk "platforms;android-33" "build-tools;33.0.2"
         
     - name: Cache Buildozer directory
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           .buildozer
@@ -97,7 +102,24 @@ jobs:
         key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec', 'requirements.txt') }}
         restore-keys: |
           ${{ runner.os }}-buildozer-
-          
+
+    - name: Cache Pip cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Cache ccache
+      uses: actions/cache@v4
+      with:
+        path: ~/.ccache
+        key: ${{ runner.os }}-ccache-${{ hashFiles('buildozer.spec', 'requirements.txt') }}-${{ github.run_id }}
+        restore-keys: |
+          ${{ runner.os }}-ccache-${{ hashFiles('buildozer.spec', 'requirements.txt') }}-
+          ${{ runner.os }}-ccache-
+
     - name: Install Python dependencies
       run: |
         pip install --upgrade pip
@@ -146,6 +168,8 @@ jobs:
         ANDROIDAPI: 33
         ANDROIDMINAPI: 21
         MAKEFLAGS: -j2
+        CCACHE_DIR: ~/.ccache
+        CCACHE_MAXSIZE: 1G
       run: |
         buildozer -v android debug
         
@@ -165,6 +189,8 @@ jobs:
         ANDROIDAPI: 33
         ANDROIDMINAPI: 21
         MAKEFLAGS: -j2
+        CCACHE_DIR: ~/.ccache
+        CCACHE_MAXSIZE: 1G
       run: |
         buildozer -v android release
         

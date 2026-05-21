@@ -61,7 +61,7 @@ android.wakelock = True
 android.logcat_filters = *:S python:D
 android.logcat_pid_only = True
 
-android.archs = arm64-v8a, armeabi-v7a
+android.archs = arm64-v8a
 
 android.allow_backup = True
 
