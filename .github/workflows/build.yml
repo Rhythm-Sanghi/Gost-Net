@@ -84,9 +84,11 @@ jobs:
     - name: Setup Android SDK Path for Buildozer
       run: |
         mkdir -p $HOME/android-sdk
+        ln -s $ANDROID_HOME/licenses $HOME/android-sdk/licenses
         ln -s $ANDROID_HOME/cmdline-tools/latest $HOME/android-sdk/tools
         ln -s $ANDROID_HOME/platform-tools $HOME/android-sdk/platform-tools
         ls -l $HOME/android-sdk/tools/bin/sdkmanager
+        yes | $HOME/android-sdk/tools/bin/sdkmanager --sdk_root=$HOME/android-sdk --licenses || true
         yes | $HOME/android-sdk/tools/bin/sdkmanager --sdk_root=$HOME/android-sdk "platforms;android-33" "build-tools;33.0.2"
         
     - name: Cache Buildozer directory
