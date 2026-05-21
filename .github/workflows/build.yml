@@ -145,6 +145,7 @@ jobs:
         ANDROIDNDK: /usr/local/lib/android/sdk/ndk/25.1.8937393
         ANDROIDAPI: 33
         ANDROIDMINAPI: 21
+        MAKEFLAGS: -j2
       run: |
         buildozer -v android debug
         
@@ -163,6 +164,7 @@ jobs:
         ANDROIDNDK: /usr/local/lib/android/sdk/ndk/25.1.8937393
         ANDROIDAPI: 33
         ANDROIDMINAPI: 21
+        MAKEFLAGS: -j2
       run: |
         buildozer -v android release
         
