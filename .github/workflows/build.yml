@@ -84,8 +84,9 @@ jobs:
     - name: Setup Android SDK Path for Buildozer
       run: |
         sudo chown -R runner:runner /usr/local/lib/android/sdk
-        yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --sdk_root=/usr/local/lib/android/sdk --licenses || true
-        yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --sdk_root=/usr/local/lib/android/sdk "platforms;android-33" "build-tools;33.0.2"
+        ln -sfn /usr/local/lib/android/sdk/cmdline-tools/latest /usr/local/lib/android/sdk/tools
+        yes | /usr/local/lib/android/sdk/tools/bin/sdkmanager --sdk_root=/usr/local/lib/android/sdk --licenses || true
+        yes | /usr/local/lib/android/sdk/tools/bin/sdkmanager --sdk_root=/usr/local/lib/android/sdk "platforms;android-33" "build-tools;33.0.2"
         
     - name: Cache Buildozer directory
       uses: actions/cache@v3
