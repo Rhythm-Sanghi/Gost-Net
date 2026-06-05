@@ -147,13 +147,80 @@ from diagnostics import get_diagnostics, encrypt_telemetry_file, copy_to_downloa
 from telemetry_logger import get_telemetry_logger
 
 try:
-    from kivy_garden.mapview import MapView, MapMarker
+    from kivy_garden.mapview import MapView, MapMarker, MapSource
     MAPVIEW_AVAILABLE = True
 except ImportError:
-    MapView = None
-    MapMarker = None
-    MAPVIEW_AVAILABLE = False
-    print("[MapScreen] MapView not available - tactical map disabled")
+    try:
+        from kivy.garden.mapview import MapView, MapMarker, MapSource
+        MAPVIEW_AVAILABLE = True
+    except ImportError:
+        MapView = None
+        MapMarker = None
+        MapSource = None
+        MAPVIEW_AVAILABLE = False
+        print("[MapScreen] MapView not available - tactical map disabled")
+
+if MAPVIEW_AVAILABLE and MapSource:
+    import sqlite3
+    class OfflineMBTilesMapSource(MapSource):
+        def __init__(self, mbtiles_path, **kwargs):
+            self.mbtiles_path = mbtiles_path
+            self.db = sqlite3.connect(mbtiles_path, check_same_thread=False)
+            min_zoom = 0
+            max_zoom = 19
+            try:
+                cursor = self.db.cursor()
+                cursor.execute("SELECT value FROM metadata WHERE name='minzoom'")
+                row = cursor.fetchone()
+                if row:
+                    min_zoom = int(row[0])
+                cursor.execute("SELECT value FROM metadata WHERE name='maxzoom'")
+                row = cursor.fetchone()
+                if row:
+                    max_zoom = int(row[0])
+            except Exception as e:
+                print(f"[OfflineMBTilesMapSource] Metadata fetch error: {e}")
+            
+            super().__init__(
+                min_zoom=min_zoom,
+                max_zoom=max_zoom,
+                **kwargs
+            )
+            
+        def fill_tile(self, tile):
+            if tile.state == "done":
+                return
+            
+            zoom = tile.zoom
+            x = tile.tile_x
+            y = tile.tile_y
+            
+            try:
+                cursor = self.db.cursor()
+                cursor.execute(
+                    "SELECT tile_data FROM tiles WHERE zoom_level = ? AND tile_column = ? AND tile_row = ?",
+                    (zoom, x, y)
+                )
+                row = cursor.fetchone()
+                if row and row[0]:
+                    tile_data = row[0]
+                    cache_fn = tile.cache_fn
+                    os.makedirs(os.path.dirname(cache_fn), exist_ok=True)
+                    with open(cache_fn, 'wb') as f:
+                        f.write(tile_data)
+                    
+                    def _done(dt):
+                        tile.set_source(cache_fn)
+                    Clock.schedule_once(_done, 0)
+                    return
+            except Exception as e:
+                print(f"[OfflineMBTilesMapSource] Error retrieving tile {zoom}/{x}/{y}: {e}")
+                
+            super().fill_tile(tile)
+else:
+    class OfflineMBTilesMapSource(object):
+        def __init__(self, mbtiles_path, **kwargs):
+            pass
 
 # Configure soft input mode for Android keyboard handling
 if is_android:
@@ -265,8 +332,12 @@ class LockScreen(MDScreen):
         
         def shred_worker():
             try:
+                if app:
+                    app.decoy_mode = True
+                
                 if app and app.persistence_db:
                     app.persistence_db.shred_everything()
+                    app.persistence_db.recreate_and_populate_mock_data()
                 
                 audio_manager = get_audio_manager()
                 audio_manager.shred_cache()
@@ -274,26 +345,26 @@ class LockScreen(MDScreen):
                 if hasattr(app, 'crypto_manager') and app.crypto_manager:
                     app.crypto_manager.shred_all_keys()
                 
-                Clock.schedule_once(lambda dt: self.show_empty_radar(), 0)
+                Clock.schedule_once(lambda dt: self.show_decoy_radar(), 0)
             except Exception as e:
                 print(f"[LockScreen] Shredding error: {e}")
-                Clock.schedule_once(lambda dt: self.show_empty_radar(), 0)
+                Clock.schedule_once(lambda dt: self.show_decoy_radar(), 0)
         
         shred_thread = threading.Thread(target=shred_worker, daemon=False)
         shred_thread.start()
     
-    def show_empty_radar(self):
+    def show_decoy_radar(self):
         app = MDApp.get_running_app()
         if app and app.root:
             try:
-                radar_screen = app.root.get_screen('radar')
-                if hasattr(radar_screen, 'peers'):
-                    radar_screen.peers = []
-                if hasattr(radar_screen, 'update_peers_display'):
-                    radar_screen.update_peers_display()
+                # Trigger a radar screen peer refresh with decoy mock data
+                app.update_radar_peers({})
                 app.root.current = 'radar'
             except Exception as e:
-                print(f"[LockScreen] Radar transition error: {e}")
+                print(f"[LockScreen] Decoy radar transition error: {e}")
+                
+    def show_empty_radar(self):
+        self.show_decoy_radar()
 
 
 class MapMarkerPopup(MapMarker if MAPVIEW_AVAILABLE else object):
@@ -367,6 +438,7 @@ class MapScreen(MDScreen):
             self.map_view.map_source.cache = True
             
             self.init_user_marker()
+            self.load_offline_map()
             
             layout.add_widget(self.map_view)
         else:
@@ -407,6 +479,23 @@ class MapScreen(MDScreen):
         
         Clock.schedule_interval(self.update_user_location, 2.0)
     
+    def on_pre_enter(self):
+        self.load_offline_map()
+
+    def load_offline_map(self):
+        if not self.map_view:
+            return
+        app = MDApp.get_running_app()
+        if app and app.config:
+            mbtiles_path = app.config.get("mbtiles_path")
+            if mbtiles_path and os.path.exists(mbtiles_path):
+                try:
+                    print(f"[MapScreen] Setting map source to offline database: {mbtiles_path}")
+                    offline_source = OfflineMBTilesMapSource(mbtiles_path)
+                    self.map_view.map_source = offline_source
+                except Exception as e:
+                    print(f"[MapScreen] Failed to set offline map source: {e}")
+
     def init_user_marker(self):
         if not MAPVIEW_AVAILABLE or not self.map_view or not MapMarker:
             return
@@ -672,6 +761,129 @@ class RadarWidget(Widget):
         end_y = cy + dp(100) * math.sin(rad)
         
         self.sweep.points = [cx, cy, end_x, end_y]
+        
+from kivy.uix.label import Label
+
+class MeshTopologyWidget(Widget):
+    """Visual network graph showing the local node, discovered peers, and mesh routes."""
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.routing_table = {}
+        self.bind(pos=self.redraw, size=self.redraw)
+        
+    def update_mesh(self, routing_table):
+        self.routing_table = routing_table
+        self.redraw()
+        
+    def redraw(self, *args):
+        self.canvas.clear()
+        self.clear_widgets()
+        
+        # Calculate center coordinates
+        center_x = self.x + self.width / 2
+        center_y = self.y + self.height / 2
+        
+        # Draw dark styling background
+        with self.canvas:
+            Color(0.05, 0.05, 0.08, 1)
+            Rectangle(pos=self.pos, size=self.size)
+            
+        if not self.routing_table:
+            # Draw local node only
+            with self.canvas:
+                Color(0.2, 0.8, 0.2, 1) # Green
+                Ellipse(pos=(center_x - 15, center_y - 15), size=(30, 30))
+            
+            # Local node label
+            lbl = Label(text="ME (Local)", font_size='12sp', color=(0.2, 0.8, 0.2, 1))
+            lbl.pos = (center_x - 50, center_y - 35)
+            lbl.size = (100, 20)
+            self.add_widget(lbl)
+            return
+            
+        # Extract unique nodes
+        nodes = set()
+        for dest, route in self.routing_table.items():
+            if dest == 'error':
+                continue
+            nodes.add(dest)
+            if isinstance(route, dict):
+                next_hop = route.get('next_hop')
+                if next_hop and next_hop != 'N/A' and next_hop != dest:
+                    nodes.add(next_hop)
+                    
+        nodes_list = sorted(list(nodes))
+        num_nodes = len(nodes_list)
+        
+        if num_nodes == 0:
+            with self.canvas:
+                Color(0.2, 0.8, 0.2, 1)
+                Ellipse(pos=(center_x - 15, center_y - 15), size=(30, 30))
+            lbl = Label(text="ME (Local)", font_size='12sp', color=(0.2, 0.8, 0.2, 1))
+            lbl.pos = (center_x - 50, center_y - 35)
+            lbl.size = (100, 20)
+            self.add_widget(lbl)
+            return
+            
+        # Distribute remote nodes on a circle
+        import math
+        radius = min(self.width, self.height) * 0.35
+        node_coords = {}
+        
+        for i, node_id in enumerate(nodes_list):
+            angle = 2 * math.pi * i / num_nodes
+            nx = center_x + radius * math.cos(angle)
+            ny = center_y + radius * math.sin(angle)
+            node_coords[node_id] = (nx, ny)
+            
+        with self.canvas:
+            # Draw route connections
+            for dest, route in self.routing_table.items():
+                if dest not in node_coords:
+                    continue
+                
+                dest_coords = node_coords[dest]
+                next_hop = None
+                if isinstance(route, dict):
+                    next_hop = route.get('next_hop')
+                    
+                if not next_hop or next_hop == dest or next_hop == 'N/A':
+                    # Direct route (blue)
+                    Color(0.2, 0.6, 1.0, 0.8)
+                    Line(points=[center_x, center_y, dest_coords[0], dest_coords[1]], width=2)
+                else:
+                    # Indirect route via next_hop (orange dashed)
+                    if next_hop in node_coords:
+                        hop_coords = node_coords[next_hop]
+                        # Draw local to next hop (blue)
+                        Color(0.2, 0.6, 1.0, 0.6)
+                        Line(points=[center_x, center_y, hop_coords[0], hop_coords[1]], width=2)
+                        # Draw next hop to destination (orange dashed)
+                        Color(1.0, 0.6, 0.2, 0.8)
+                        Line(points=[hop_coords[0], hop_coords[1], dest_coords[0], dest_coords[1]], width=1.5, dash_length=4, dash_offset=2)
+                        
+            # Draw local node
+            Color(0.2, 0.8, 0.2, 1) # Green
+            Ellipse(pos=(center_x - 15, center_y - 15), size=(30, 30))
+            
+            # Draw remote nodes
+            for node_id, coords in node_coords.items():
+                Color(0.2, 0.5, 0.8, 1) # Blue
+                Ellipse(pos=(coords[0] - 10, coords[1] - 10), size=(20, 20))
+                
+        # Draw labels
+        lbl = Label(text="ME (Local)", font_size='12sp', color=(0.2, 0.8, 0.2, 1))
+        lbl.pos = (center_x - 50, center_y - 35)
+        lbl.size = (100, 20)
+        self.add_widget(lbl)
+        
+        for node_id, coords in node_coords.items():
+            label_text = node_id[:8] + "..." if len(node_id) > 8 else node_id
+            lbl = Label(text=label_text, font_size='11sp', color=(0.8, 0.8, 0.8, 1))
+            lbl.pos = (coords[0] - 50, coords[1] - 25)
+            lbl.size = (100, 15)
+            self.add_widget(lbl)
 
 
 class DiagnosticsScreen(MDScreen):
@@ -682,6 +894,7 @@ class DiagnosticsScreen(MDScreen):
         self.telemetry = get_telemetry_logger()
         self.update_scheduled = False
         self.export_status_label = None
+        self.view_mode = 'list'
         
         layout = MDBoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
         
@@ -727,6 +940,21 @@ class DiagnosticsScreen(MDScreen):
         buttons_layout.add_widget(clear_btn)
         layout.add_widget(buttons_layout)
         
+        # View toggle layout
+        toggle_layout = MDBoxLayout(
+            orientation='horizontal',
+            size_hint_y=None,
+            height=dp(48),
+            spacing=dp(10),
+            padding=dp(10)
+        )
+        self.toggle_btn = MDButton(style='elevated', size_hint_x=1)
+        self.toggle_btn_text = MDButtonText(text='📊 View Mesh Graph')
+        self.toggle_btn.add_widget(self.toggle_btn_text)
+        self.toggle_btn.bind(on_release=self.toggle_view)
+        toggle_layout.add_widget(self.toggle_btn)
+        layout.add_widget(toggle_layout)
+        
         self.export_status_label = MDLabel(
             text='',
             halign='center',
@@ -738,17 +966,42 @@ class DiagnosticsScreen(MDScreen):
         )
         layout.add_widget(self.export_status_label)
         
-        scroll = MDScrollView(size_hint=(1, 1))
+        self.scroll = MDScrollView(size_hint=(1, 1))
         self.diag_box = MDBoxLayout(
             orientation='vertical',
             adaptive_height=True,
             spacing=dp(15),
             padding=dp(10)
         )
-        scroll.add_widget(self.diag_box)
-        layout.add_widget(scroll)
+        self.scroll.add_widget(self.diag_box)
+        layout.add_widget(self.scroll)
+        
+        self.mesh_graph = MeshTopologyWidget(size_hint=(1, 1))
+        self.mesh_graph.opacity = 0
+        self.mesh_graph.size_hint_y = None
+        self.mesh_graph.height = 0
+        layout.add_widget(self.mesh_graph)
         
         self.add_widget(layout)
+        
+    def toggle_view(self, *args):
+        if self.view_mode == 'list':
+            self.view_mode = 'graph'
+            self.toggle_btn_text.text = '📋 View Text Diagnostics'
+            self.scroll.opacity = 0
+            self.scroll.size_hint_y = None
+            self.scroll.height = 0
+            self.mesh_graph.opacity = 1
+            self.mesh_graph.size_hint_y = 1
+        else:
+            self.view_mode = 'list'
+            self.toggle_btn_text.text = '📊 View Mesh Graph'
+            self.scroll.opacity = 1
+            self.scroll.size_hint_y = 1
+            self.mesh_graph.opacity = 0
+            self.mesh_graph.size_hint_y = None
+            self.mesh_graph.height = 0
+        self.refresh_diagnostics()
     
     def on_enter(self):
         if not self.update_scheduled:
@@ -763,6 +1016,24 @@ class DiagnosticsScreen(MDScreen):
     def refresh_diagnostics(self, dt=None):
         try:
             snapshot = self.diagnostics.get_diagnostics_snapshot()
+            
+            app = MDApp.get_running_app()
+            if app and app.decoy_mode:
+                snapshot['routing_table'] = {
+                    "wfd_alice": {"next_hop": "wfd_alice", "metric": 1},
+                    "bt_bob": {"next_hop": "bt_bob", "metric": 1},
+                    "mesh_charlie": {"next_hop": "wfd_alice", "metric": 2}
+                }
+                snapshot['node_status'] = {
+                    'local_ip': '192.168.43.10',
+                    'local_mac': 'AA:BB:CC:DD:EE:FF',
+                    'service_status': 'Running (Decoy)',
+                    'uptime': '00h 42m 15s'
+                }
+            
+            if self.view_mode == 'graph':
+                self.mesh_graph.update_mesh(snapshot.get('routing_table', {}))
+                
             self.diag_box.clear_widgets()
             
             node_status = snapshot['node_status']
@@ -2068,8 +2339,23 @@ class ChatScreen(MDScreen):
             return
         
         app = MDApp.get_running_app()
-        
-        if not app or not app.engine:
+        if not app:
+            return
+            
+        if app.decoy_mode:
+            if app.persistence_db:
+                app.persistence_db.save_message(self.peer_ip, "me", "text", message_text)
+                
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            bubble = MessageBubble(message_text, timestamp, is_sent=True)
+            self.messages_list.add_widget(bubble)
+            self.message_input.text = ''
+            
+            Clock.schedule_once(lambda dt: self._scroll_to_bottom(), 0.2)
+            self.trigger_decoy_reply(self.peer_ip, message_text)
+            return
+
+        if not app.engine:
             print("[ChatScreen] Engine not available")
             return
         
@@ -2088,6 +2374,50 @@ class ChatScreen(MDScreen):
             self.message_input.text = ''
             
             Clock.schedule_once(lambda dt: self._scroll_to_bottom(), 0.2)
+
+    def trigger_decoy_reply(self, peer_ip, user_message):
+        Clock.schedule_once(lambda dt: self._generate_decoy_reply(peer_ip, user_message), 1.5)
+
+    def _generate_decoy_reply(self, peer_ip, user_message):
+        app = MDApp.get_running_app()
+        if not app or not app.decoy_mode:
+            return
+            
+        responses = {
+            "wfd_alice": [
+                "Copy that. We are monitoring the frequencies.",
+                "Understood. Maintain radio silence if possible.",
+                "Got it. Update me if anything changes.",
+                "Affirmative. Base is secure for now."
+            ],
+            "bt_bob": [
+                "Understood. Moving to the rendezvous point now.",
+                "Roger. See you at the coordinates.",
+                "Acknowledged. Bringing the extra supplies.",
+                "Copy. Bob out."
+            ],
+            "mesh_charlie": [
+                "Understood. Mesh routing is stable.",
+                "Roger, copying telemetry logs.",
+                "Acknowledged. Relay node is fully operational.",
+                "Copy that. Keeping packets flowing."
+            ]
+        }
+        
+        import random
+        peer_responses = responses.get(peer_ip, [
+            "Message received. Connection stable.",
+            "Acknowledged. All systems green.",
+            "Copy that. Understood."
+        ])
+        reply_text = random.choice(peer_responses)
+        
+        if app.persistence_db:
+            app.persistence_db.save_message(peer_ip, "peer", "text", reply_text)
+            
+        if self.peer_ip == peer_ip:
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            self.add_received_message(peer_ip, reply_text, timestamp)
     
     def add_received_message(self, sender_ip, message_text, timestamp, expires_at=None):
         if sender_ip == self.peer_ip:
@@ -2460,6 +2790,37 @@ class SettingsScreen(MDScreen):
         about_card.add_widget(about_content)
         settings_content.add_widget(about_card)
         
+        # Map Settings Section
+        map_card = self._create_section_card(
+            "🗺️ Map Settings",
+            "Configure offline mapping database"
+        )
+        
+        map_content = MDBoxLayout(
+            orientation='vertical',
+            adaptive_height=True,
+            spacing=dp(10),
+            padding=dp(10)
+        )
+        
+        self.map_path_label = MDLabel(
+            text="Offline Map: Not Selected",
+            font_style='Body',
+            role='small',
+            theme_text_color='Secondary',
+            size_hint_y=None,
+            height=dp(30)
+        )
+        
+        map_select_btn = MDButton(style='elevated')
+        map_select_btn.add_widget(MDButtonText(text="Select .mbtiles File"))
+        map_select_btn.bind(on_release=self.open_map_file_picker)
+        
+        map_content.add_widget(self.map_path_label)
+        map_content.add_widget(map_select_btn)
+        map_card.add_widget(map_content)
+        settings_content.add_widget(map_card)
+        
         # 5. Danger Zone
         danger_card = self._create_section_card(
             "⚠️ Danger Zone",
@@ -2551,12 +2912,62 @@ class SettingsScreen(MDScreen):
             
             # Load dark mode
             self.dark_mode_switch.active = app.config.is_dark_mode()
+            
+            # Load mbtiles path
+            mbtiles_path = app.config.get("mbtiles_path")
+            if mbtiles_path:
+                self.map_path_label.text = f"Offline Map: {os.path.basename(mbtiles_path)}"
+            else:
+                self.map_path_label.text = "Offline Map: Not Selected"
         else:
             print("[SettingsScreen] Config not available, using defaults")
             self.username_field.text = "GhostUser"
             self.retention_slider.value = 24
             self.retention_label.text = "Message Retention: 24 hours"
             self.dark_mode_switch.active = True
+            self.map_path_label.text = "Offline Map: Not Selected"
+            
+    def open_map_file_picker(self, *args):
+        try:
+            from kivymd.uix.filemanager import MDFileManager
+            
+            def exit_manager(*args):
+                self.map_file_manager.close()
+                
+            def select_path(path):
+                self.map_file_manager.close()
+                if path.endswith('.mbtiles'):
+                    app = MDApp.get_running_app()
+                    if app and app.config:
+                        app.config.set("mbtiles_path", path)
+                        app.config.save()
+                        self.map_path_label.text = f"Offline Map: {os.path.basename(path)}"
+                        print(f"[Settings] Selected mbtiles path: {path}")
+                else:
+                    print("[Settings] Selected file must be an .mbtiles file")
+            
+            self.map_file_manager = MDFileManager(
+                exit_manager=exit_manager,
+                select_path=select_path,
+                ext=['.mbtiles']
+            )
+            
+            # Determine start path
+            start_path = os.path.expanduser("~")
+            if platform.system() == 'Android' or platform.system() == 'Linux':
+                candidate_paths = [
+                    '/storage/emulated/0/',
+                    os.path.join(os.path.expanduser("~"), "Downloads"),
+                    os.path.join(os.path.expanduser("~"), "Documents"),
+                ]
+                for p in candidate_paths:
+                    if os.path.exists(p) and os.path.isdir(p):
+                        start_path = p
+                        break
+            
+            self.map_file_manager.show(start_path)
+        except Exception as e:
+            print(f"[Settings] Map file manager error: {e}")
     
     def update_username(self, *args):
         """Update the username in config."""
@@ -2798,6 +3209,7 @@ class GhostNetApp(MDApp):
         self.username = "GhostUser"
         self.service_running = False
         self.notification_manager = None
+        self.decoy_mode = False
     
     def _start_android_service(self):
         if platform.system() == 'Android':
@@ -3157,6 +3569,18 @@ class GhostNetApp(MDApp):
         """Update radar screen with peer list and network status (main thread)."""
         try:
             radar_screen = self.root.get_screen('radar')
+            
+            if self.decoy_mode:
+                decoy_peers = {
+                    "wfd_alice": {"username": "Alice (Base)", "peer_id": "wfd_alice", "visible_peers": []},
+                    "bt_bob": {"username": "Bob (Mobile)", "peer_id": "bt_bob", "visible_peers": []},
+                    "mesh_charlie": {"username": "Charlie (Relay)", "peer_id": "mesh_charlie", "visible_peers": ["wfd_alice"]}
+                }
+                radar_screen.update_peers(decoy_peers)
+                decoy_net_status = {"type": "wifi", "ip": "192.168.43.10"}
+                radar_screen.update_network_status(decoy_net_status)
+                return
+            
             radar_screen.update_peers(peers_dict)
             
             # Also update network status

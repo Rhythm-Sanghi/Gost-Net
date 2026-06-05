@@ -196,6 +196,12 @@ class GhostEngine:
                     # Continue without creating directory - app can still function
                     self.downloads_dir = os.getcwd()
         
+        self.spool_dir = os.path.join(os.path.dirname(self.downloads_dir), "spool")
+        try:
+            os.makedirs(self.spool_dir, exist_ok=True)
+        except Exception as e:
+            print(f"[GhostEngine] WARNING: Could not create spool directory: {e}")
+        
         self.persistence_db = None
         if enable_storage and PERSISTENCE_AVAILABLE:
             if persistence_db:
@@ -1179,8 +1185,31 @@ class GhostEngine:
         def _send_file_worker():
             nonlocal target_ip, peer_id
             try:
+                is_reachable = False
                 if target_ip and (target_ip.startswith('wfd_') or target_ip.startswith('bt_')):
                     peer_id = target_ip
+                
+                if peer_id and self.connection_manager:
+                    connection = self.connection_manager.get_connection(peer_id)
+                    if peer_id.startswith('wfd_') and connection and connection.connected_ip:
+                        is_reachable = True
+                        target_ip = connection.connected_ip
+                    elif peer_id.startswith('bt_') and connection and connection.state.value == 'connected' and connection.rfcomm_socket:
+                        is_reachable = True
+                
+                if not is_reachable and target_ip and not (target_ip.startswith('wfd_') or target_ip.startswith('bt_')):
+                    try:
+                        test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        test_sock.settimeout(2.0)
+                        test_sock.connect((target_ip, self.TCP_PORT))
+                        test_sock.close()
+                        is_reachable = True
+                    except:
+                        is_reachable = False
+                
+                if not is_reachable:
+                    self._spool_file(peer_id or target_ip, file_path, use_chunking, ttl)
+                    return True
                 
                 if peer_id and peer_id.startswith('wfd_') and self.connection_manager:
                     connection = self.connection_manager.get_connection(peer_id)
@@ -1378,6 +1407,179 @@ class GhostEngine:
         threading.Thread(target=_send_file_worker, daemon=True).start()
         return True
     
+    def _spool_file(self, target, file_path, use_chunking, ttl):
+        if not os.path.exists(file_path):
+            print(f"[DTN Spool] Original file not found: {file_path}")
+            return False
+            
+        import shutil
+        filename = os.path.basename(file_path)
+        filesize = os.path.getsize(file_path)
+        checksum = self._calculate_checksum(file_path)
+        file_id = hashlib.sha256(f"{filename}{time.time()}".encode()).hexdigest()[:16]
+        
+        dest_dir = os.path.join(self.spool_dir, str(target), file_id)
+        os.makedirs(dest_dir, exist_ok=True)
+        
+        spooled_file_path = os.path.join(dest_dir, "file.dat")
+        try:
+            shutil.copy2(file_path, spooled_file_path)
+        except Exception as e:
+            print(f"[DTN Spool] Error copying file to spool: {e}")
+            return False
+            
+        metadata = {
+            "target": target,
+            "original_filename": filename,
+            "filesize": filesize,
+            "file_id": file_id,
+            "checksum": checksum,
+            "chunked": use_chunking,
+            "ttl": ttl,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        try:
+            with open(os.path.join(dest_dir, "metadata.json"), 'w') as f:
+                json.dump(metadata, f)
+            print(f"[DTN Spool] Spooled file {filename} for peer {target} (file_id: {file_id})")
+            return True
+        except Exception as e:
+            print(f"[DTN Spool] Error saving metadata: {e}")
+            return False
+
+    def _process_dtn_spool(self):
+        if not hasattr(self, 'spool_dir') or not os.path.exists(self.spool_dir):
+            return
+            
+        for target_dir in os.listdir(self.spool_dir):
+            target_path = os.path.join(self.spool_dir, target_dir)
+            if not os.path.isdir(target_path):
+                continue
+                
+            is_reachable = False
+            if self.connection_manager:
+                connection = self.connection_manager.get_connection(target_dir)
+                if target_dir.startswith('wfd_') and connection and connection.connected_ip:
+                    is_reachable = True
+                elif target_dir.startswith('bt_') and connection and connection.state.value == 'connected' and connection.rfcomm_socket:
+                    is_reachable = True
+            
+            # For standard IPs, check if we can connect
+            if not is_reachable and not (target_dir.startswith('wfd_') or target_dir.startswith('bt_')):
+                try:
+                    test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    test_sock.settimeout(2.0)
+                    test_sock.connect((target_dir, self.TCP_PORT))
+                    test_sock.close()
+                    is_reachable = True
+                except:
+                    is_reachable = False
+                    
+            if is_reachable:
+                for item_dir in os.listdir(target_path):
+                    item_path = os.path.join(target_path, item_dir)
+                    meta_path = os.path.join(item_path, "metadata.json")
+                    data_path = os.path.join(item_path, "file.dat")
+                    
+                    if os.path.exists(meta_path) and os.path.exists(data_path):
+                        try:
+                            with open(meta_path, 'r') as f:
+                                meta = json.load(f)
+                                
+                            print(f"[DTN Spool] Peer {target_dir} is reachable. Forwarding spooled file: {meta['original_filename']}")
+                            success = self._send_spooled_file(target_dir, data_path, meta)
+                            if success:
+                                import shutil
+                                shutil.rmtree(item_path)
+                                print(f"[DTN Spool] Spooled item sent successfully and removed: {meta['original_filename']}")
+                        except Exception as e:
+                            print(f"[DTN Spool] Error sending spooled item {item_dir}: {e}")
+
+    def _send_spooled_file(self, target, file_path, meta):
+        try:
+            use_chunking = meta.get("chunked", True)
+            filesize = meta["filesize"]
+            filename = meta["original_filename"]
+            checksum = meta["checksum"]
+            file_id = meta["file_id"]
+            ttl = meta.get("ttl")
+            
+            header = {
+                "type": "FILE",
+                "filename": filename,
+                "filesize": filesize,
+                "file_id": file_id,
+                "checksum": checksum,
+                "chunked": use_chunking,
+                "timestamp": datetime.now().isoformat(),
+                "target_peer_id": target,
+                "network_ttl": 10
+            }
+            if ttl is not None and ttl > 0:
+                header["ttl"] = ttl
+                
+            header_json = json.dumps(header)
+            encrypted_header = self._encrypt_message(header_json)
+            
+            if target.startswith('bt_') or target.startswith('wfd_'):
+                if not self.connection_manager:
+                    return False
+                connection = self.connection_manager.get_connection(target)
+                if not connection or connection.state.value != 'connected' or not connection.rfcomm_socket:
+                    return False
+                sock = connection.rfcomm_socket
+            else:
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(10.0)
+                    sock.connect((target, self.TCP_PORT))
+                except:
+                    return False
+                    
+            sock.sendall(encrypted_header + self.HEADER_DELIMITER)
+            
+            bytes_sent = 0
+            if use_chunking and self.crypto_manager:
+                with open(file_path, 'rb') as f:
+                    while True:
+                        chunk = f.read(self.CHUNK_SIZE)
+                        if not chunk:
+                            break
+                        
+                        nonce, ciphertext = self.crypto_manager.encrypt_file_chunk(target, chunk)
+                        if not nonce or not ciphertext:
+                            chunk_data = chunk
+                            nonce = b'\x00' * 12
+                        else:
+                            chunk_data = ciphertext
+                        
+                        chunk_header = nonce + len(chunk_data).to_bytes(4, 'big')
+                        sock.sendall(chunk_header + chunk_data)
+                        bytes_sent += len(chunk_data)
+            else:
+                with open(file_path, 'rb') as f:
+                    while True:
+                        chunk = f.read(self.BUFFER_SIZE)
+                        if not chunk:
+                            break
+                        sock.sendall(chunk)
+                        bytes_sent += len(chunk)
+            
+            if not (target.startswith('bt_') or target.startswith('wfd_')):
+                try:
+                    sock.close()
+                except:
+                    pass
+                    
+            timestamp_unix = time.time()
+            if self.persistence_db:
+                self.persistence_db.save_message(target, "me", "file", filename, timestamp_unix, ttl)
+            return True
+        except Exception as e:
+            print(f"[DTN Spool] Error sending spooled file: {e}")
+            return False
+
     def _network_monitor_worker(self):
         """Monitor network changes and reconnect if needed."""
         while self.running:
@@ -1405,6 +1607,9 @@ class GhostEngine:
                     stale = self.routing_table.remove_stale_routes()
                     if stale:
                         print(f"[Routing] Removed {len(stale)} stale routes")
+                
+                # Periodically process DTN spool
+                self._process_dtn_spool()
             
             except Exception as e:
                 if self.running:

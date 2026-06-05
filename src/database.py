@@ -59,6 +59,13 @@ class PersistenceDatabase:
                     ON messages(expires_at)
                 ''')
                 
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS double_ratchet_sessions (
+                        peer_id TEXT PRIMARY KEY,
+                        session_data TEXT NOT NULL
+                    )
+                ''')
+                
                 conn.commit()
                 
                 self._migrate_add_expires_at_column(conn, cursor)
@@ -429,3 +436,105 @@ class PersistenceDatabase:
                                 f.write(os.urandom(size))
                 except Exception as e:
                     print(f"[PersistenceDatabase] Error overwriting database file: {e}")
+                
+                return True
+
+    def recreate_and_populate_mock_data(self) -> bool:
+        # 1. Initialize empty tables
+        self._initialize_database()
+        
+        # 2. Insert mock peers and messages
+        import time
+        now = time.time()
+        conn = None
+        with self.db_lock:
+            try:
+                conn = sqlite3.connect(self.db_path, timeout=10.0)
+                cursor = conn.cursor()
+                
+                # Mock Peers
+                peers = [
+                    ("wfd_alice", "Alice (Base)", "12:34:56:78:90:AB", "wifi-direct", now),
+                    ("bt_bob", "Bob (Mobile)", "CD:EF:12:34:56:78", "bluetooth", now - 300),
+                    ("mesh_charlie", "Charlie (Relay)", "90:AB:CD:EF:12:34", "mesh", now - 1200)
+                ]
+                for p in peers:
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO peers (peer_id, device_name, mac_address, discovery_type, last_seen)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', p)
+                
+                # Mock Messages
+                messages = [
+                    ("wfd_alice", "peer", "text", "Hey, did you make it to the safe zone?", now - 3600),
+                    ("wfd_alice", "me", "text", "Yes, just arrived. How's the situation?", now - 3500),
+                    ("wfd_alice", "peer", "text", "Quiet for now. Keep your radio on.", now - 3400),
+                    ("bt_bob", "peer", "text", "Meeting at coordinates 45.123, -12.345 at 1800.", now - 1800),
+                    ("bt_bob", "me", "text", "Copy that, see you there.", now - 1700),
+                    ("mesh_charlie", "peer", "text", "Supplies are running low, anyone got extra water?", now - 1200),
+                    ("wfd_alice", "peer", "text", "We have some at the base.", now - 1100)
+                ]
+                for m in messages:
+                    content_blob = m[3].encode('utf-8')
+                    cursor.execute('''
+                        INSERT INTO messages (peer_id, sender_type, content_type, content, timestamp, expires_at)
+                        VALUES (?, ?, ?, ?, ?, NULL)
+                    ''', (m[0], m[1], m[2], content_blob, m[4]))
+                
+                conn.commit()
+                print("[PersistenceDatabase] Decoy mock data populated successfully")
+                return True
+            except Exception as e:
+                print(f"[PersistenceDatabase] Error populating mock data: {e}")
+                return False
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+
+    def save_ratchet_session(self, peer_id: str, session_data: str) -> bool:
+        conn = None
+        with self.db_lock:
+            try:
+                conn = sqlite3.connect(self.db_path, timeout=10.0)
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT OR REPLACE INTO double_ratchet_sessions (peer_id, session_data)
+                    VALUES (?, ?)
+                ''', (peer_id, session_data))
+                conn.commit()
+                return True
+            except Exception as e:
+                print(f"[PersistenceDatabase] Error saving ratchet session for {peer_id}: {e}")
+                return False
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+
+    def get_ratchet_session(self, peer_id: str) -> Optional[str]:
+        conn = None
+        with self.db_lock:
+            try:
+                conn = sqlite3.connect(self.db_path, timeout=10.0)
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT session_data FROM double_ratchet_sessions WHERE peer_id = ?
+                ''', (peer_id,))
+                row = cursor.fetchone()
+                if row:
+                    return row[0]
+                return None
+            except Exception as e:
+                print(f"[PersistenceDatabase] Error loading ratchet session for {peer_id}: {e}")
+                return None
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
