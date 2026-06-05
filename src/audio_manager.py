@@ -2,9 +2,13 @@ import os
 import shutil
 import time
 import threading
-import platform
 from pathlib import Path
 from kivy.clock import Clock
+try:
+    from kivy.utils import platform as kivy_platform
+    is_android = (kivy_platform == 'android')
+except ImportError:
+    is_android = False
 
 
 class AudioManager:
@@ -20,7 +24,7 @@ class AudioManager:
     
     def _setup_recording_dir(self):
         try:
-            if platform.system() == 'Android':
+            if is_android:
                 from jnius import autoclass
                 Context = autoclass('android.content.Context')
                 PythonService = autoclass('org.kivy.android.PythonService')
@@ -49,7 +53,7 @@ class AudioManager:
             f"voice_msg_{timestamp}.m4a"
         )
         
-        if platform.system() == 'Android':
+        if is_android:
             return self._start_recording_android()
         else:
             return self._start_recording_desktop()
@@ -103,7 +107,7 @@ class AudioManager:
             print("[AudioManager] Not currently recording")
             return self.current_recording_path
         
-        if platform.system() == 'Android':
+        if is_android:
             return self._stop_recording_android()
         else:
             return self._stop_recording_desktop()
@@ -154,7 +158,7 @@ class AudioManager:
             print(f"[AudioManager] File not found: {file_path}")
             return False
         
-        if platform.system() == 'Android':
+        if is_android:
             return self._play_audio_android(file_path)
         else:
             return self._play_audio_desktop(file_path)
@@ -214,7 +218,7 @@ class AudioManager:
         
         threading.Thread(target=monitor_worker, daemon=True).start()
     
-    def _play_audio_desktop(self):
+    def _play_audio_desktop(self, file_path=None):
         self.is_playing = True
         print("[AudioManager] Mock playback started")
         
@@ -244,7 +248,7 @@ class AudioManager:
         if not self.is_playing:
             return
         
-        if platform.system() == 'Android':
+        if is_android:
             try:
                 if hasattr(self, 'player') and self.player:
                     self.player.stop()

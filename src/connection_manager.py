@@ -390,15 +390,17 @@ class ConnectionManager:
             return False
         
         try:
+            payload = message.encode('utf-8') if isinstance(message, str) else message
+            
             if connection.discovery_type == 'wifi_direct':
                 if connection.socket:
-                    connection.socket.sendall(message.encode('utf-8'))
+                    connection.socket.sendall(payload)
                     print(f"[ConnectionManager] Message sent via WiFi Direct to {peer_id}")
                     return True
             
             elif connection.discovery_type == 'bluetooth':
                 if connection.rfcomm_socket:
-                    connection.rfcomm_socket.send(message.encode('utf-8'))
+                    connection.rfcomm_socket.send(payload)
                     print(f"[ConnectionManager] Message sent via Bluetooth to {peer_id}")
                     return True
         

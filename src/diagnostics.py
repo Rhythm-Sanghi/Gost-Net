@@ -209,9 +209,13 @@ def encrypt_telemetry_file(input_path: str, output_path: str) -> bool:
 
 def copy_to_downloads(file_path: str, file_name: str) -> Optional[str]:
     try:
-        import platform as _platform_check
+        try:
+            from kivy.utils import platform as kivy_platform
+            is_android = (kivy_platform == 'android')
+        except ImportError:
+            is_android = False
         
-        if _platform_check.system() == 'Android':
+        if is_android:
             try:
                 from kivy.utils import platform
                 from android.permissions import request_permissions, Permission

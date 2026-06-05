@@ -41,8 +41,13 @@ class ConfigManager:
             config_path: Path to configuration file
         """
         # Use platform-aware paths
-        import platform
-        if platform.system() == 'Android':
+        try:
+            from kivy.utils import platform as kivy_platform
+            is_android = (kivy_platform == 'android')
+        except ImportError:
+            is_android = False
+            
+        if is_android:
             # On Android, use app-specific storage (don't import kivy.core.window here)
             try:
                 config_path = os.path.join(os.path.expanduser("~"), ".ghostnet", config_path)

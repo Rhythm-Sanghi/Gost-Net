@@ -20,6 +20,7 @@ Permissions Required:
 import logging
 from typing import List, Optional, Callable, Dict
 from enum import Enum
+from dataclasses import dataclass
 import sys
 
 # Configure logging

@@ -1,7 +1,11 @@
-import platform
 import threading
 import time
 from kivy.clock import Clock
+try:
+    from kivy.utils import platform as kivy_platform
+    is_android = (kivy_platform == 'android')
+except ImportError:
+    is_android = False
 
 
 class GPSManager:
@@ -15,7 +19,7 @@ class GPSManager:
         self._setup_gps()
     
     def _setup_gps(self):
-        if platform.system() == 'Android':
+        if is_android:
             self._setup_android_gps()
         else:
             self._setup_desktop_gps()
@@ -38,7 +42,7 @@ class GPSManager:
             print("[GPSManager] GPS already started")
             return False
         
-        if platform.system() == 'Android':
+        if is_android:
             return self._start_android_gps()
         else:
             return self._start_desktop_gps()
@@ -114,7 +118,7 @@ class GPSManager:
         if not self.is_started:
             return
         
-        if platform.system() == 'Android':
+        if is_android:
             self._stop_android_gps()
         else:
             self._stop_desktop_gps()

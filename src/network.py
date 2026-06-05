@@ -171,8 +171,13 @@ class GhostEngine:
         else:
             # Try primary path first, with fallback
             try:
-                import platform
-                if platform.system() == 'Android':
+                try:
+                    from kivy.utils import platform as kivy_platform
+                    is_android = (kivy_platform == 'android')
+                except ImportError:
+                    is_android = False
+                
+                if is_android:
                     # On Android, use app-specific storage
                     self.downloads_dir = os.path.join(os.path.expanduser("~"), ".ghostnet", "downloads")
                 else:
@@ -671,7 +676,7 @@ class GhostEngine:
                         ).start()
                     
                     if self.on_peer_update:
-                        self.on_peer_update(self.get_peers())
+                        self.on_peer_update(self.get_all_peers_combined())
                 
             except socket.timeout:
                 continue
@@ -706,7 +711,7 @@ class GhostEngine:
                 
                 # Notify UI if peers were removed
                 if stale_ips and self.on_peer_update:
-                    self.on_peer_update(self.get_peers())
+                    self.on_peer_update(self.get_all_peers_combined())
                     
             except Exception as e:
                 print(f"[Pruning] Error: {e}")
@@ -1078,6 +1083,9 @@ class GhostEngine:
             True if sent successfully, False otherwise
         """
         try:
+            if target_ip and (target_ip.startswith('wfd_') or target_ip.startswith('bt_')):
+                peer_id = target_ip
+                
             if peer_id and self.connection_manager:
                 plaintext = message_text.encode('utf-8')
                 encrypted_payload = None
@@ -1169,7 +1177,97 @@ class GhostEngine:
             True if started successfully
         """
         def _send_file_worker():
+            nonlocal target_ip, peer_id
             try:
+                if target_ip and (target_ip.startswith('wfd_') or target_ip.startswith('bt_')):
+                    peer_id = target_ip
+                
+                if peer_id and peer_id.startswith('wfd_') and self.connection_manager:
+                    connection = self.connection_manager.get_connection(peer_id)
+                    if connection and connection.connected_ip:
+                        target_ip = connection.connected_ip
+                
+                if peer_id and peer_id.startswith('bt_') and self.connection_manager:
+                    connection = self.connection_manager.get_connection(peer_id)
+                    if connection and connection.state.value == 'connected' and connection.rfcomm_socket:
+                        if not os.path.isfile(file_path):
+                            print(f"[Send File] File not found: {file_path}")
+                            return False
+                        
+                        filesize = os.path.getsize(file_path)
+                        filename = os.path.basename(file_path)
+                        checksum = self._calculate_checksum(file_path)
+                        file_id = hashlib.sha256(f"{filename}{time.time()}".encode()).hexdigest()[:16]
+                        
+                        header = {
+                            "type": "FILE",
+                            "filename": filename,
+                            "filesize": filesize,
+                            "file_id": file_id,
+                            "checksum": checksum,
+                            "chunked": use_chunking,
+                            "timestamp": datetime.now().isoformat(),
+                            "target_peer_id": target_ip,
+                            "network_ttl": 10
+                        }
+                        if ttl is not None and ttl > 0:
+                            header["ttl"] = ttl
+                            
+                        header_json = json.dumps(header)
+                        encrypted_header = self._encrypt_message(header_json)
+                        
+                        connection.rfcomm_socket.sendall(encrypted_header + self.HEADER_DELIMITER)
+                        
+                        bytes_sent = 0
+                        if use_chunking and self.crypto_manager:
+                            with open(file_path, 'rb') as f:
+                                while True:
+                                    chunk = f.read(self.CHUNK_SIZE)
+                                    if not chunk:
+                                        break
+                                    
+                                    nonce, ciphertext = self.crypto_manager.encrypt_file_chunk(peer_id, chunk)
+                                    if not nonce or not ciphertext:
+                                        chunk_data = chunk
+                                        nonce = b'\x00' * 12
+                                    else:
+                                        chunk_data = ciphertext
+                                    
+                                    chunk_header = nonce + len(chunk_data).to_bytes(4, 'big')
+                                    connection.rfcomm_socket.sendall(chunk_header + chunk_data)
+                                    bytes_sent += len(chunk_data)
+                                    if progress_callback:
+                                        progress_callback(bytes_sent, filesize)
+                        else:
+                            with open(file_path, 'rb') as f:
+                                while True:
+                                    chunk = f.read(self.BUFFER_SIZE)
+                                    if not chunk:
+                                        break
+                                    connection.rfcomm_socket.sendall(chunk)
+                                    bytes_sent += len(chunk)
+                                    if progress_callback:
+                                        progress_callback(bytes_sent, filesize)
+                        
+                        timestamp_unix = time.time()
+                        if self.persistence_db:
+                            threading.Thread(
+                                target=self.persistence_db.save_message,
+                                args=(peer_id, "me", "file", filename, timestamp_unix, ttl),
+                                daemon=True
+                            ).start()
+                        if self.db_manager:
+                            threading.Thread(
+                                target=self.db_manager.save_message,
+                                args=(peer_id, "ME", filename, "FILE", file_path, timestamp_unix),
+                                daemon=True
+                            ).start()
+                        print(f"[Send File] Successfully sent Bluetooth file '{filename}' to {peer_id}")
+                        return True
+                    else:
+                        print(f"[Send File] Bluetooth connection not active or socket unavailable for {peer_id}")
+                        return False
+                
                 if not os.path.isfile(file_path):
                     print(f"[Send File] File not found: {file_path}")
                     return False
@@ -1292,7 +1390,7 @@ class GhostEngine:
                         print(f"[Network Monitor] Network changed, updating peers")
                         # Trigger UI update with current peers
                         if self.on_peer_update:
-                            self.on_peer_update(self.get_peers())
+                            self.on_peer_update(self.get_all_peers_combined())
             
             except Exception as e:
                 if self.running:

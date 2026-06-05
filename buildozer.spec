@@ -18,7 +18,7 @@ source.exclude_patterns = *.orig,*.pyc,*.pyo,*~,*.swp,.DS_Store,*badsyntax*.py,t
 
 version = 1.0.0
 
-requirements = hostpython3==3.11.9,python3==3.11.9,kivy==2.3.0,kivymd==1.2.0,asynckivy,asyncgui,pillow,cryptography,openssl,libffi,plyer
+requirements = hostpython3==3.11.9,python3==3.11.9,kivy==2.3.0,kivymd==1.2.0,asynckivy,asyncgui,pillow,cryptography,openssl,libffi,plyer,netifaces,materialyoucolor
 
 garden_requirements = mapview
 

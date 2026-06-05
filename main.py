@@ -5,8 +5,13 @@ Offline-first, local network communication with file transfer support.
 """
 
 import os
-import platform as _platform_check
-if _platform_check.system() == 'Android':
+try:
+    from kivy.utils import platform as _kivy_platform
+    _is_android = (_kivy_platform == 'android')
+except ImportError:
+    _is_android = False
+
+if _is_android:
     try:
         from logger import activate_opsec
         activate_opsec()
@@ -119,8 +124,13 @@ from kivy.uix.widget import Widget
 from datetime import datetime
 import threading
 import os
-import platform
+try:
+    from kivy.utils import platform as _kivy_platform
+    is_android = (_kivy_platform == 'android')
+except ImportError:
+    is_android = False
 import sys
+import platform
 import time
 
 # Add src/ directory to path so all app modules can be imported by name
@@ -146,7 +156,7 @@ except ImportError:
     print("[MapScreen] MapView not available - tactical map disabled")
 
 # Configure soft input mode for Android keyboard handling
-if platform.system() == 'Android':
+if is_android:
     from kivy.core.window import Window
     Window.keyboard_anim_args = {'d': 0.2, 't': 'in_out_cubic'}
 
@@ -180,14 +190,14 @@ class LockScreen(MDScreen):
         layout.add_widget(spacer1)
         
         self.pin_field = MDTextField(
-            mode='rectangle',
-            hint_text='Enter PIN',
+            mode='outlined',
             password=True,
             size_hint_x=1,
             size_hint_y=None,
             height=dp(56),
             multiline=False
         )
+        self.pin_field.add_widget(MDTextFieldHintText(text="Enter PIN"))
         layout.add_widget(self.pin_field)
         
         button_layout = MDBoxLayout(
