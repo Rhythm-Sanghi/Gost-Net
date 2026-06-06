@@ -120,7 +120,7 @@ from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.properties import StringProperty, ListProperty, NumericProperty
 from kivy.animation import Animation
-from kivy.graphics import Color, Ellipse, Line
+from kivy.graphics import Color, Ellipse, Line, Rectangle
 from kivy.uix.widget import Widget
 from datetime import datetime
 import threading
