@@ -3689,6 +3689,7 @@ class GhostNetApp(MDApp):
         self.service_running = False
         self.notification_manager = None
         self.decoy_mode = False
+        self.auth_manager = AuthenticationManager()
         
     @property
     def config(self):
