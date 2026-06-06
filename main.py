@@ -266,6 +266,7 @@ class LockScreen(MDScreen):
             multiline=False
         )
         self.pin_field.add_widget(MDTextFieldHintText(text="Enter PIN"))
+        self.pin_field.add_widget(MDTextFieldHelperText(text="Default Master PIN is 1234", mode="persistent"))
         layout.add_widget(self.pin_field)
         
         button_layout = MDBoxLayout(
@@ -3007,6 +3008,56 @@ class SettingsScreen(MDScreen):
         anonymity_card.add_widget(anonymity_content)
         settings_content.add_widget(anonymity_card)
         
+        # Security Section (Change PINs)
+        security_card = self._create_section_card(
+            "🔐 Security Settings",
+            "Update authentication PINs"
+        )
+        security_card.height = dp(310)
+        
+        security_content = MDBoxLayout(
+            orientation='vertical',
+            adaptive_height=True,
+            spacing=dp(10),
+            padding=dp(10)
+        )
+        
+        self.old_pin_field = MDTextField(
+            mode='outlined',
+            password=True,
+            size_hint_y=None,
+            height=dp(50)
+        )
+        self.old_pin_field.add_widget(MDTextFieldHintText(text="Current Master PIN"))
+        
+        self.new_master_field = MDTextField(
+            mode='outlined',
+            password=True,
+            size_hint_y=None,
+            height=dp(50)
+        )
+        self.new_master_field.add_widget(MDTextFieldHintText(text="New Master PIN"))
+        
+        self.new_duress_field = MDTextField(
+            mode='outlined',
+            password=True,
+            size_hint_y=None,
+            height=dp(50)
+        )
+        self.new_duress_field.add_widget(MDTextFieldHintText(text="New Duress PIN"))
+        
+        pin_btn = MDButton(style='elevated')
+        pin_btn.add_widget(MDButtonText(text="Change PINs"))
+        pin_btn.bind(on_release=self.change_pins_submit)
+        
+        security_content.add_widget(self.old_pin_field)
+        security_content.add_widget(self.new_master_field)
+        security_content.add_widget(self.new_duress_field)
+        security_content.add_widget(pin_btn)
+        
+        security_card.add_widget(security_content)
+        settings_content.add_widget(security_card)
+        
         # 5. Danger Zone
         danger_card = self._create_section_card(
             "⚠️ Danger Zone",
@@ -3274,6 +3325,51 @@ class SettingsScreen(MDScreen):
             print(f"[Settings] Chaffing enabled changed to {active}")
             if app.engine:
                 app.engine.chaffing_enabled = active
+                
+    def show_status_dialog(self, title, message):
+        content = MDBoxLayout(
+            orientation='vertical',
+            padding=dp(20),
+            adaptive_height=True
+        )
+        content.add_widget(MDLabel(
+            text=message,
+            font_style='Body',
+            role='medium'
+        ))
+        
+        dialog = MDDialog(
+            MDDialogHeadlineText(text=title),
+            MDDialogContentContainer(content, orientation="vertical"),
+            MDDialogButtonContainer(
+                Widget(),
+                MDButton(
+                    MDButtonText(text="OK"),
+                    style="text",
+                    on_release=lambda x: dialog.dismiss()
+                )
+            )
+        )
+        dialog.open()
+        
+    def change_pins_submit(self, *args):
+        old_pin = self.old_pin_field.text.strip()
+        new_master = self.new_master_field.text.strip()
+        new_duress = self.new_duress_field.text.strip()
+        
+        if not old_pin or not new_master or not new_duress:
+            self.show_status_dialog("Error", "All PIN fields must be filled")
+            return
+            
+        auth_manager = AuthenticationManager()
+        success, msg = auth_manager.change_pins(old_pin, new_master, new_duress)
+        if success:
+            self.show_status_dialog("Success", msg)
+            self.old_pin_field.text = ""
+            self.new_master_field.text = ""
+            self.new_duress_field.text = ""
+        else:
+            self.show_status_dialog("Error", msg)
     
     def show_about_dialog(self, *args):
         """Show about dialog with app information."""

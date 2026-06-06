@@ -1740,6 +1740,56 @@ def test_decoy_vault_simulation():
     print("Background decoy simulator active insertions: PASSED")
     print("Decoy Vault Simulation Test: PASSED!\n")
 
+def test_change_pins():
+    print("=== Test 40: PIN Change & KEK Re-encryption ===")
+    import sys
+    import os
+    import shutil
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+    from auth_manager import AuthenticationManager
+    
+    test_dir = "test_auth_dir"
+    if os.path.exists(test_dir):
+        shutil.rmtree(test_dir)
+    os.makedirs(test_dir, exist_ok=True)
+    
+    try:
+        # Create encrypted key file using default PIN "1234"
+        auth = AuthenticationManager(storage_dir=test_dir)
+        db_key = auth.get_or_create_db_key("1234")
+        assert db_key is not None
+        
+        # Verify default PINs are saved
+        assert auth.verify_master_pin("1234")
+        assert auth.verify_duress_pin("9999")
+        
+        # Change PINs: master 1234 -> 4321, duress 9999 -> 8888
+        success, msg = auth.change_pins("1234", "4321", "8888")
+        assert success, f"Failed to change PINs: {msg}"
+        
+        # Verify old PINs no longer work
+        assert not auth.verify_master_pin("1234")
+        assert not auth.verify_duress_pin("9999")
+        
+        # Verify new PINs work
+        assert auth.verify_master_pin("4321")
+        assert auth.verify_duress_pin("8888")
+        
+        # Instantiate a new AuthManager to simulate app restart
+        auth2 = AuthenticationManager(storage_dir=test_dir)
+        assert auth2.verify_master_pin("4321")
+        assert auth2.verify_duress_pin("8888")
+        
+        # Decrypt DB key with new PIN
+        db_key2 = auth2.get_or_create_db_key("4321")
+        assert db_key2 == db_key, "Decrypted DB key does not match original key after PIN change!"
+        
+        print("PIN change and DB key re-encryption: PASSED")
+        print("PIN Change & KEK Re-encryption Test: PASSED!\n")
+    finally:
+        if os.path.exists(test_dir):
+            shutil.rmtree(test_dir)
+
 if __name__ == "__main__":
     test_steganography()
     try:
@@ -1795,5 +1845,8 @@ if __name__ == "__main__":
     test_mesh_time_synchronization()
     test_double_envelope_dtn_anonymity()
     test_decoy_vault_simulation()
+    
+    # PIN update test
+    test_change_pins()
     
     print("All new feature tests completed successfully!")

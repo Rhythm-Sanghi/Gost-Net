@@ -93,6 +93,90 @@ class AuthenticationManager:
             self.pin_salt = None
             return False
 
+    def change_pins(self, old_pin: str, new_master: str, new_duress: str) -> Tuple[bool, str]:
+        """
+        Securely updates Master and Duress PINs, generating a new salt and 
+        re-encrypting the persistent database key and signing key under the new derived KEK.
+        """
+        if not self.verify_master_pin(old_pin):
+            return False, "Current Master PIN is incorrect"
+            
+        if len(new_master) < 4 or len(new_duress) < 4:
+            return False, "New PINs must be at least 4 characters long"
+            
+        if new_master == new_duress:
+            return False, "Master PIN and Duress PIN cannot be identical"
+            
+        try:
+            import base64
+            from cryptography.fernet import Fernet
+            
+            # Load DB salt
+            salt_path = os.path.join(self.storage_dir, ".db_salt")
+            if os.path.exists(salt_path):
+                with open(salt_path, 'rb') as f:
+                    db_salt = f.read()
+            else:
+                db_salt = b'default_ghostnet_db_salt_v1'
+            
+            # Derive KEK from old PIN
+            old_kek_bytes = self._derive_kek(old_pin, db_salt)
+            old_kek = base64.urlsafe_b64encode(old_kek_bytes)
+            cipher_old = Fernet(old_kek)
+            
+            # Decrypt existing DB key
+            enc_key_path = os.path.join(self.storage_dir, "secret.key.enc")
+            raw_db_key = None
+            if os.path.exists(enc_key_path):
+                with open(enc_key_path, 'rb') as f:
+                    encrypted_db_key = f.read()
+                raw_db_key = cipher_old.decrypt(encrypted_db_key)
+                
+            # Decrypt existing signing key
+            enc_sig_path = os.path.join(self.storage_dir, "signing.key.enc")
+            raw_sig_key = None
+            if os.path.exists(enc_sig_path):
+                with open(enc_sig_path, 'rb') as f:
+                    encrypted_sig_key = f.read()
+                raw_sig_key = cipher_old.decrypt(encrypted_sig_key)
+            
+            # Generate new salt and save updated hashes (updates .auth_secrets)
+            new_salt = os.urandom(16)
+            self.pin_salt = new_salt
+            self.master_pin_hash = self._hash_pin(new_master)
+            self.duress_pin_hash = self._hash_pin(new_duress)
+            self._save_pin_hashes()
+            
+            # Derive KEK from new PIN
+            new_kek_bytes = self._derive_kek(new_master, db_salt)
+            new_kek = base64.urlsafe_b64encode(new_kek_bytes)
+            cipher_new = Fernet(new_kek)
+            
+            # Re-encrypt and write back DB key
+            if raw_db_key is not None:
+                new_encrypted_db = cipher_new.encrypt(raw_db_key)
+                with open(enc_key_path, 'wb') as f:
+                    f.write(new_encrypted_db)
+                try:
+                    os.chmod(enc_key_path, 0o600)
+                except:
+                    pass
+                    
+            # Re-encrypt and write back signing key
+            if raw_sig_key is not None:
+                new_encrypted_sig = cipher_new.encrypt(raw_sig_key)
+                with open(enc_sig_path, 'wb') as f:
+                    f.write(new_encrypted_sig)
+                try:
+                    os.chmod(enc_sig_path, 0o600)
+                except:
+                    pass
+                
+            return True, "PINs updated successfully"
+        except Exception as e:
+            print(f"[AuthenticationManager] Error updating PINs: {e}")
+            return False, f"Encryption update error: {str(e)}"
+
     def verify_master_pin(self, pin: str) -> bool:
         if self.is_decoy_mode_active():
             return True
