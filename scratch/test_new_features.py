@@ -16,6 +16,27 @@ from android_mocks import get_android_bluetooth
 from network import GhostEngine
 from routing import RoutingTable
 
+def safe_rmtree(path):
+    if not os.path.exists(path):
+        return
+    import gc
+    import stat
+    gc.collect()
+    def onerror(func, filepath, exc_info):
+        try:
+            os.chmod(filepath, stat.S_IWRITE)
+            func(filepath)
+        except Exception:
+            pass
+    for attempt in range(5):
+        try:
+            shutil.rmtree(path, onerror=onerror)
+            if not os.path.exists(path):
+                return
+        except Exception:
+            pass
+        time.sleep(0.2)
+
 class DummyDevice:
     def __init__(self, address):
         self.address = address
@@ -82,9 +103,9 @@ def test_epidemic_dtn_routing():
     downloads_dir = os.path.join(os.getcwd(), "test_downloads_dtn")
     spool_dir = os.path.join(os.getcwd(), "test_spool_dtn")
     if os.path.exists(downloads_dir):
-        shutil.rmtree(downloads_dir)
+        safe_rmtree(downloads_dir)
     if os.path.exists(spool_dir):
-        shutil.rmtree(spool_dir)
+        safe_rmtree(spool_dir)
         
     os.makedirs(downloads_dir, exist_ok=True)
     os.makedirs(spool_dir, exist_ok=True)
@@ -213,8 +234,8 @@ def test_epidemic_dtn_routing():
     # Clean up
     if os.path.exists(test_file):
         os.remove(test_file)
-    shutil.rmtree(downloads_dir)
-    shutil.rmtree(spool_dir)
+    safe_rmtree(downloads_dir)
+    safe_rmtree(spool_dir)
     print("Epidemic DTN Routing Test: PASSED!\n")
 
 def test_battery_aware_routing():
@@ -550,7 +571,7 @@ def test_db_encryption_rest():
     
     test_dir = "test_db_enc_dir"
     if os.path.exists(test_dir):
-        shutil.rmtree(test_dir)
+        safe_rmtree(test_dir)
     os.makedirs(test_dir, exist_ok=True)
     
     try:
@@ -590,7 +611,7 @@ def test_db_encryption_rest():
         
     finally:
         if os.path.exists(test_dir):
-            shutil.rmtree(test_dir)
+            safe_rmtree(test_dir)
 
 def test_ephemeral_mode():
     print("=== Test 13: RAM-only Ephemeral Mode ===")
@@ -1078,7 +1099,7 @@ def test_unique_pin_salts():
     dir2 = "test_auth_dir2"
     for d in [dir1, dir2]:
         if os.path.exists(d):
-            shutil.rmtree(d)
+            safe_rmtree(d)
             
     try:
         auth1 = AuthenticationManager(storage_dir=dir1)
@@ -1096,7 +1117,7 @@ def test_unique_pin_salts():
     finally:
         for d in [dir1, dir2]:
             if os.path.exists(d):
-                shutil.rmtree(d)
+                safe_rmtree(d)
 
 def test_persistent_decoy_vault():
     print("=== Test 23: Persistent Decoy Vault ===")
@@ -1105,7 +1126,7 @@ def test_persistent_decoy_vault():
     
     test_dir = "test_decoy_vault_dir"
     if os.path.exists(test_dir):
-        shutil.rmtree(test_dir)
+        safe_rmtree(test_dir)
         
     try:
         auth = AuthenticationManager(storage_dir=test_dir)
@@ -1130,7 +1151,7 @@ def test_persistent_decoy_vault():
         print("Persistent Decoy Vault Test: PASSED!\n")
     finally:
         if os.path.exists(test_dir):
-            shutil.rmtree(test_dir)
+            safe_rmtree(test_dir)
 
 def test_encrypted_dtn_metadata():
     print("=== Test 24: Encrypted DTN Spool Metadata ===")
@@ -1140,7 +1161,7 @@ def test_encrypted_dtn_metadata():
     
     test_dir = "test_metadata_enc_dir"
     if os.path.exists(test_dir):
-        shutil.rmtree(test_dir)
+        safe_rmtree(test_dir)
     os.makedirs(test_dir, exist_ok=True)
     
     try:
@@ -1170,7 +1191,7 @@ def test_encrypted_dtn_metadata():
         print("Encrypted DTN Metadata Test: PASSED!\n")
     finally:
         if os.path.exists(test_dir):
-            shutil.rmtree(test_dir)
+            safe_rmtree(test_dir)
 
 def test_encrypted_telemetry():
     print("=== Test 25: Encrypted Telemetry Logs ===")
@@ -1182,7 +1203,7 @@ def test_encrypted_telemetry():
     
     test_dir = "test_telemetry_enc_dir"
     if os.path.exists(test_dir):
-        shutil.rmtree(test_dir)
+        safe_rmtree(test_dir)
     os.makedirs(test_dir, exist_ok=True)
     
     try:
@@ -1215,7 +1236,7 @@ def test_encrypted_telemetry():
         print("Encrypted Telemetry Logs Test: PASSED!\n")
     finally:
         if os.path.exists(test_dir):
-            shutil.rmtree(test_dir)
+            safe_rmtree(test_dir)
 
 def test_steganography_shuffling():
     print("=== Test 26: Shuffled LSB Steganography ===")
@@ -1323,7 +1344,7 @@ def test_hybrid_diagnostics_encryption():
     
     test_dir = "test_hybrid_enc_dir"
     if os.path.exists(test_dir):
-        shutil.rmtree(test_dir)
+        safe_rmtree(test_dir)
     os.makedirs(test_dir, exist_ok=True)
     
     try:
@@ -1374,7 +1395,7 @@ def test_hybrid_diagnostics_encryption():
         
     finally:
         if os.path.exists(test_dir):
-            shutil.rmtree(test_dir)
+            safe_rmtree(test_dir)
 
 def test_expired_message_file_shredding_with_encryption():
     print("=== Test 30: Expired Message File Shredding with Encryption ===")
@@ -1385,7 +1406,7 @@ def test_expired_message_file_shredding_with_encryption():
     
     test_dir = "test_shred_enc_dir"
     if os.path.exists(test_dir):
-        shutil.rmtree(test_dir)
+        safe_rmtree(test_dir)
     os.makedirs(test_dir, exist_ok=True)
     
     try:
@@ -1423,7 +1444,7 @@ def test_expired_message_file_shredding_with_encryption():
         
     finally:
         if os.path.exists(test_dir):
-            shutil.rmtree(test_dir)
+            safe_rmtree(test_dir)
 
 def test_wal_concurrency():
     print("=== Test 31: SQLite WAL Mode & Concurrency ===")
@@ -1434,7 +1455,7 @@ def test_wal_concurrency():
     
     test_dir = "test_wal_dir"
     if os.path.exists(test_dir):
-        shutil.rmtree(test_dir)
+        safe_rmtree(test_dir)
     os.makedirs(test_dir, exist_ok=True)
     
     try:
@@ -1461,7 +1482,7 @@ def test_wal_concurrency():
         
     finally:
         if os.path.exists(test_dir):
-            shutil.rmtree(test_dir)
+            safe_rmtree(test_dir)
 
 def test_mlock_protection():
     print("=== Test 32: mlock/munlock Swap Protection ===")
@@ -1768,7 +1789,7 @@ def test_change_pins():
     
     test_dir = "test_auth_dir"
     if os.path.exists(test_dir):
-        shutil.rmtree(test_dir)
+        safe_rmtree(test_dir)
     os.makedirs(test_dir, exist_ok=True)
     
     try:
@@ -1806,7 +1827,7 @@ def test_change_pins():
         print("PIN Change & KEK Re-encryption Test: PASSED!\n")
     finally:
         if os.path.exists(test_dir):
-            shutil.rmtree(test_dir)
+            safe_rmtree(test_dir)
 
 if __name__ == "__main__":
     test_steganography()

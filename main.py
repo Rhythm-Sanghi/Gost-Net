@@ -229,25 +229,54 @@ if is_android:
     Window.keyboard_anim_args = {'d': 0.2, 't': 'in_out_cubic'}
 
 
+def apply_premium_background(screen):
+    """Applies a premium space-obsidian dark canvas background to a screen."""
+    from kivy.graphics import Color, Rectangle
+    from kivymd.app import MDApp
+    
+    app = MDApp.get_running_app()
+    is_dark = app.theme_cls.theme_style == "Dark"
+    bg_color = (0.04, 0.04, 0.05, 1) if is_dark else (0.96, 0.97, 0.99, 1)
+    
+    with screen.canvas.before:
+        screen.bg_color_inst = Color(*bg_color)
+        screen.bg_rect = Rectangle(pos=screen.pos, size=screen.size)
+    
+    def _update_bg(instance, value):
+        screen.bg_rect.pos = screen.pos
+        screen.bg_rect.size = screen.size
+        
+    screen.bind(pos=_update_bg, size=_update_bg)
+    
+    def _update_theme_color(*args):
+        is_dark = app.theme_cls.theme_style == "Dark"
+        c = (0.04, 0.04, 0.05, 1) if is_dark else (0.96, 0.97, 0.99, 1)
+        screen.bg_color_inst.rgba = c
+        
+    app.theme_cls.bind(theme_style=_update_theme_color)
+
+
 class LockScreen(MDScreen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.name = 'lock'
+        apply_premium_background(self)
         self.auth_manager = AuthenticationManager()
         self.shredding_in_progress = False
         
         root_layout = MDFloatLayout(size_hint=(1, 1))
         
-        # Modern centered card container
+        # Modern centered glassmorphic card container
         card = MDCard(
             orientation='vertical',
             style='outlined',
             size_hint=(None, None),
-            size=(dp(360), dp(380)),
+            size=(dp(340), dp(360)),
             pos_hint={'center_x': 0.5, 'center_y': 0.5},
             padding=dp(24),
             spacing=dp(24),
-            md_bg_color=(0.08, 0.08, 0.1, 1)
+            md_bg_color=(0.1, 0.12, 0.18, 0.65),
+            line_color=(0.25, 0.32, 0.45, 0.35)
         )
         
         # Clean typography brand area
@@ -267,7 +296,7 @@ class LockScreen(MDScreen):
         )
         
         subtitle = MDLabel(
-            text='Secure Mesh Messaging',
+            text='Offline Mesh Network',
             font_style='Body',
             role='small',
             theme_text_color='Secondary',
@@ -292,9 +321,14 @@ class LockScreen(MDScreen):
         submit_btn = MDButton(
             style='filled',
             theme_width='Custom',
-            size_hint_x=1
+            size_hint_x=1,
+            theme_bg_color='Custom',
+            md_bg_color=(0.65, 0.79, 0.92, 1)
         )
-        submit_btn.add_widget(MDButtonText(text='Unlock'))
+        btn_text = MDButtonText(text='Unlock')
+        btn_text.theme_text_color = 'Custom'
+        btn_text.text_color = (0.05, 0.06, 0.1, 1)
+        submit_btn.add_widget(btn_text)
         submit_btn.bind(on_release=self.on_pin_submit)
         card.add_widget(submit_btn)
         
@@ -453,6 +487,7 @@ class MapScreen(MDScreen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.name = 'map'
+        apply_premium_background(self)
         self.gps_manager = get_gps_manager()
         self.sos_markers = {}
         self.user_marker = None
@@ -468,14 +503,19 @@ class MapScreen(MDScreen):
             spacing=dp(10)
         )
         
-        back_btn = MDIconButton(icon='arrow-left')
+        back_btn = MDIconButton(
+            icon='arrow-left',
+            theme_icon_color='Custom',
+            icon_color=(0.65, 0.79, 0.92, 1)
+        )
         back_btn.bind(on_release=self.go_back)
         
         title = MDLabel(
             text='Tactical Map',
             font_style='Title',
             role='large',
-            theme_text_color='Primary'
+            theme_text_color='Primary',
+            pos_hint={'center_y': 0.5}
         )
         
         header.add_widget(back_btn)
@@ -691,6 +731,7 @@ class BootScreen(MDScreen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.name = 'boot'
+        apply_premium_background(self)
         
         root_layout = MDFloatLayout(size_hint=(1, 1))
         
@@ -741,7 +782,8 @@ class BootScreen(MDScreen):
             size_hint=(None, None),
             size=(dp(40), dp(40)),
             pos_hint={'center_x': 0.5},
-            active=True
+            active=True,
+            color=(0.65, 0.79, 0.92, 1)
         )
         
         # Status label
@@ -786,47 +828,98 @@ class BootScreen(MDScreen):
 
 
 class RadarWidget(Widget):
-    """Animated radar visualization for the home screen."""
+    """Animated radar visualization for the home screen with high-fidelity effects."""
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.angle = 0
+        self.pulse_val = 0.0
+        self.peers = {}
+        self.bind(pos=self.redraw, size=self.redraw)
+        Clock.schedule_interval(self.animate_sweep, 0.03)
+        Clock.schedule_interval(self.animate_pulse, 0.05)
         
-        with self.canvas:
-            # Draw radar circles
-            Color(0.2, 0.6, 0.8, 0.3)
-            self.circle1 = Ellipse(size=(dp(200), dp(200)))
-            Color(0.2, 0.6, 0.8, 0.2)
-            self.circle2 = Ellipse(size=(dp(150), dp(150)))
-            Color(0.2, 0.6, 0.8, 0.1)
-            self.circle3 = Ellipse(size=(dp(100), dp(100)))
+    def update_peers(self, peers):
+        self.peers = peers
+        self.redraw()
+        
+    def redraw(self, *args):
+        self.canvas.clear()
+        cx, cy = self.center_x, self.center_y
+        radius = min(self.width, self.height) * 0.45
+        if radius <= 0:
+            return
             
-            # Radar sweep line
-            Color(0.3, 0.8, 1.0, 0.8)
-            self.sweep = Line(points=[], width=2)
-        
-        self.bind(pos=self.update_radar, size=self.update_radar)
-        Clock.schedule_interval(self.animate_sweep, 0.05)
-    
-    def update_radar(self, *args):
-        """Update radar position and size."""
-        cx, cy = self.center_x, self.center_y
-        
-        self.circle1.pos = (cx - dp(100), cy - dp(100))
-        self.circle2.pos = (cx - dp(75), cy - dp(75))
-        self.circle3.pos = (cx - dp(50), cy - dp(50))
-    
+        with self.canvas:
+            import math
+            import hashlib
+            from kivy.graphics import Color, Line, Ellipse
+            
+            # Draw concentric background grid rings
+            for i in range(1, 4):
+                r = radius * (i / 3)
+                Color(0.65, 0.79, 0.92, 0.06 * i)
+                Line(circle=(cx, cy, r), width=1, dash_length=4, dash_offset=2)
+                
+            # Draw crosshairs (subtle grid axes)
+            Color(0.65, 0.79, 0.92, 0.08)
+            Line(points=[cx - radius, cy, cx + radius, cy], width=1)
+            Line(points=[cx, cy - radius, cx, cy + radius], width=1)
+            
+            # Draw the rotating sweep trail (multiple lines with decaying alpha)
+            for i in range(12):
+                alpha = 0.8 * (1 - i / 12)
+                trail_angle = (self.angle - i * 2.2) % 360
+                rad = math.radians(trail_angle)
+                tx = cx + radius * math.cos(rad)
+                ty = cy + radius * math.sin(rad)
+                
+                Color(0.65, 0.79, 0.92, alpha)
+                Line(points=[cx, cy, tx, ty], width=1.5 if i == 0 else 0.8)
+            
+            # Draw remote peer blips deterministically plotted on radar
+            for ip, info in self.peers.items():
+                h = int(hashlib.md5(ip.encode()).hexdigest(), 16)
+                peer_angle = h % 360
+                peer_dist_ratio = 0.3 + (h % 50) / 100.0
+                
+                p_rad = math.radians(peer_angle)
+                px = cx + radius * peer_dist_ratio * math.cos(p_rad)
+                py = cy + radius * peer_dist_ratio * math.sin(p_rad)
+                
+                # Draw pulsing blip halo
+                pulse_r = 6 + self.pulse_val * 10
+                pulse_alpha = 0.45 * (1.0 - self.pulse_val)
+                Color(0.65, 0.79, 0.92, pulse_alpha)
+                Line(circle=(px, py, pulse_r), width=1)
+                
+                # Outer circle
+                Color(0.65, 0.79, 0.92, 0.35)
+                Line(circle=(px, py, 6), width=1)
+                
+                # Solid inner node
+                Color(0.65, 0.79, 0.92, 1.0)
+                Ellipse(pos=(px - 3, py - 3), size=(6, 6))
+            
+            # Central local node with pulsing ring
+            pulse_r = 10 + self.pulse_val * 25
+            pulse_alpha = 0.5 * (1.0 - self.pulse_val)
+            Color(0.65, 0.79, 0.92, pulse_alpha)
+            Line(circle=(cx, cy, pulse_r), width=1)
+            
+            # Central ice-blue solid node
+            Color(0.65, 0.79, 0.92, 1.0)
+            Ellipse(pos=(cx - 5, cy - 5), size=(10, 10))
+            
     def animate_sweep(self, dt):
-        """Animate the radar sweep line."""
-        import math
-        self.angle = (self.angle + 3) % 360
-        rad = math.radians(self.angle)
+        """Animate the sweep angle."""
+        self.angle = (self.angle + 2) % 360
+        self.redraw()
         
-        cx, cy = self.center_x, self.center_y
-        end_x = cx + dp(100) * math.cos(rad)
-        end_y = cy + dp(100) * math.sin(rad)
-        
-        self.sweep.points = [cx, cy, end_x, end_y]
+    def animate_pulse(self, dt):
+        """Animate the sonar pulse."""
+        self.pulse_val = (self.pulse_val + 0.02) % 1.0
+        self.redraw()
         
 from kivy.uix.label import Label
 
@@ -836,10 +929,16 @@ class MeshTopologyWidget(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.routing_table = {}
+        self.pulse_val = 0.0
         self.bind(pos=self.redraw, size=self.redraw)
+        Clock.schedule_interval(self.animate_pulse, 0.05)
         
     def update_mesh(self, routing_table):
         self.routing_table = routing_table
+        self.redraw()
+        
+    def animate_pulse(self, dt):
+        self.pulse_val = (self.pulse_val + 0.02) % 1.0
         self.redraw()
         
     def redraw(self, *args):
@@ -850,19 +949,27 @@ class MeshTopologyWidget(Widget):
         center_x = self.x + self.width / 2
         center_y = self.y + self.height / 2
         
-        # Draw dark styling background
+        # Draw dark styling background matching matte obsidian
         with self.canvas:
-            Color(0.05, 0.05, 0.08, 1)
+            Color(0.04, 0.04, 0.05, 1)
             Rectangle(pos=self.pos, size=self.size)
             
         if not self.routing_table:
             # Draw local node only
             with self.canvas:
-                Color(0.2, 0.8, 0.2, 1) # Green
-                Ellipse(pos=(center_x - 15, center_y - 15), size=(30, 30))
+                # Pulsing halo
+                pulse_r = 14 + self.pulse_val * 12
+                pulse_alpha = 0.4 * (1.0 - self.pulse_val)
+                Color(0.65, 0.79, 0.92, pulse_alpha)
+                Line(circle=(center_x, center_y, pulse_r), width=1)
+                
+                Color(0.65, 0.79, 0.92, 0.3)
+                Line(circle=(center_x, center_y, 18), width=1.5)
+                Color(0.65, 0.79, 0.92, 1) # Ice-Blue
+                Ellipse(pos=(center_x - 10, center_y - 10), size=(20, 20))
             
             # Local node label
-            lbl = Label(text="ME (Local)", font_size='12sp', color=(0.2, 0.8, 0.2, 1))
+            lbl = Label(text="ME (Local)", font_size='12sp', color=(0.65, 0.79, 0.92, 1))
             lbl.pos = (center_x - 50, center_y - 35)
             lbl.size = (100, 20)
             self.add_widget(lbl)
@@ -884,9 +991,17 @@ class MeshTopologyWidget(Widget):
         
         if num_nodes == 0:
             with self.canvas:
-                Color(0.2, 0.8, 0.2, 1)
-                Ellipse(pos=(center_x - 15, center_y - 15), size=(30, 30))
-            lbl = Label(text="ME (Local)", font_size='12sp', color=(0.2, 0.8, 0.2, 1))
+                # Pulsing halo
+                pulse_r = 14 + self.pulse_val * 12
+                pulse_alpha = 0.4 * (1.0 - self.pulse_val)
+                Color(0.65, 0.79, 0.92, pulse_alpha)
+                Line(circle=(center_x, center_y, pulse_r), width=1)
+                
+                Color(0.65, 0.79, 0.92, 0.3)
+                Line(circle=(center_x, center_y, 18), width=1.5)
+                Color(0.65, 0.79, 0.92, 1)
+                Ellipse(pos=(center_x - 10, center_y - 10), size=(20, 20))
+            lbl = Label(text="ME (Local)", font_size='12sp', color=(0.65, 0.79, 0.92, 1))
             lbl.pos = (center_x - 50, center_y - 35)
             lbl.size = (100, 20)
             self.add_widget(lbl)
@@ -915,31 +1030,45 @@ class MeshTopologyWidget(Widget):
                     next_hop = route.get('next_hop')
                     
                 if not next_hop or next_hop == dest or next_hop == 'N/A':
-                    # Direct route (blue)
-                    Color(0.2, 0.6, 1.0, 0.8)
-                    Line(points=[center_x, center_y, dest_coords[0], dest_coords[1]], width=2)
+                    # Direct route (ice-blue)
+                    Color(0.65, 0.79, 0.92, 0.8)
+                    Line(points=[center_x, center_y, dest_coords[0], dest_coords[1]], width=1.5)
                 else:
-                    # Indirect route via next_hop (orange dashed)
+                    # Indirect route via next_hop (dashed grey-indigo)
                     if next_hop in node_coords:
                         hop_coords = node_coords[next_hop]
-                        # Draw local to next hop (blue)
-                        Color(0.2, 0.6, 1.0, 0.6)
-                        Line(points=[center_x, center_y, hop_coords[0], hop_coords[1]], width=2)
-                        # Draw next hop to destination (orange dashed)
-                        Color(1.0, 0.6, 0.2, 0.8)
+                        # Draw local to next hop (ice-blue translucent)
+                        Color(0.65, 0.79, 0.92, 0.4)
+                        Line(points=[center_x, center_y, hop_coords[0], hop_coords[1]], width=1.5)
+                        # Draw next hop to destination (dashed grey-indigo)
+                        Color(0.25, 0.32, 0.45, 0.6)
                         Line(points=[hop_coords[0], hop_coords[1], dest_coords[0], dest_coords[1]], width=1.5, dash_length=4, dash_offset=2)
                         
-            # Draw local node
-            Color(0.2, 0.8, 0.2, 1) # Green
-            Ellipse(pos=(center_x - 15, center_y - 15), size=(30, 30))
+            # Draw local node with pulsing outer glow ring
+            pulse_r = 14 + self.pulse_val * 12
+            pulse_alpha = 0.4 * (1.0 - self.pulse_val)
+            Color(0.65, 0.79, 0.92, pulse_alpha)
+            Line(circle=(center_x, center_y, pulse_r), width=1)
             
-            # Draw remote nodes
+            Color(0.65, 0.79, 0.92, 0.3)
+            Line(circle=(center_x, center_y, 18), width=1.5)
+            Color(0.65, 0.79, 0.92, 1) # Ice-Blue
+            Ellipse(pos=(center_x - 10, center_y - 10), size=(20, 20))
+            
+            # Draw remote nodes with pulsing outer glow ring
             for node_id, coords in node_coords.items():
-                Color(0.2, 0.5, 0.8, 1) # Blue
-                Ellipse(pos=(coords[0] - 10, coords[1] - 10), size=(20, 20))
+                pulse_rem_r = 10 + self.pulse_val * 10
+                pulse_rem_alpha = 0.4 * (1.0 - self.pulse_val)
+                Color(0.18, 0.36, 0.68, pulse_rem_alpha)
+                Line(circle=(coords[0], coords[1], pulse_rem_r), width=1)
+                
+                Color(0.18, 0.36, 0.68, 0.3)
+                Line(circle=(coords[0], coords[1], 14), width=1.5)
+                Color(0.18, 0.36, 0.68, 0.85) # Indigo
+                Ellipse(pos=(coords[0] - 8, coords[1] - 8), size=(16, 16))
                 
         # Draw labels
-        lbl = Label(text="ME (Local)", font_size='12sp', color=(0.2, 0.8, 0.2, 1))
+        lbl = Label(text="ME (Local)", font_size='12sp', color=(0.65, 0.79, 0.92, 1))
         lbl.pos = (center_x - 50, center_y - 35)
         lbl.size = (100, 20)
         self.add_widget(lbl)
@@ -956,6 +1085,7 @@ class DiagnosticsScreen(MDScreen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.name = 'diagnostics'
+        apply_premium_background(self)
         self.diagnostics = get_diagnostics()
         self.telemetry = get_telemetry_logger()
         self.update_scheduled = False
@@ -976,23 +1106,27 @@ class DiagnosticsScreen(MDScreen):
         header = MDBoxLayout(
             orientation='horizontal',
             size_hint_y=None,
-            height=dp(50),
+            height=dp(60),
             spacing=dp(10)
         )
         
+        back_btn = MDIconButton(
+            icon='arrow-left',
+            theme_icon_color='Custom',
+            icon_color=(0.65, 0.79, 0.92, 1)
+        )
+        back_btn.bind(on_release=self.close_diagnostics)
+        
         title = MDLabel(
-            text='DIAGNOSTICS',
+            text='Diagnostics',
             font_style='Title',
             role='large',
-            size_hint_x=0.6
+            theme_text_color='Primary',
+            pos_hint={'center_y': 0.5}
         )
         
-        close_btn = MDButton(style='text', size_hint_x=0.2)
-        close_btn.add_widget(MDButtonText(text='Close'))
-        close_btn.bind(on_release=self.close_diagnostics)
-        
+        header.add_widget(back_btn)
         header.add_widget(title)
-        header.add_widget(close_btn)
         layout.add_widget(header)
         
         buttons_layout = MDBoxLayout(
@@ -1003,12 +1137,31 @@ class DiagnosticsScreen(MDScreen):
             padding=dp(10)
         )
         
-        export_btn = MDButton(style='elevated', size_hint_x=0.5)
-        export_btn.add_widget(MDButtonText(text='Export Mission Logs'))
+        export_btn = MDButton(
+            style='filled',
+            theme_width='Custom',
+            size_hint_x=0.5,
+            theme_bg_color='Custom',
+            md_bg_color=(0.65, 0.79, 0.92, 1)
+        )
+        export_btn_text = MDButtonText(text='Export Mission Logs')
+        export_btn_text.theme_text_color = 'Custom'
+        export_btn_text.text_color = (0.05, 0.06, 0.1, 1)
+        export_btn.add_widget(export_btn_text)
         export_btn.bind(on_release=self.export_mission_logs)
         
-        clear_btn = MDButton(style='elevated', size_hint_x=0.5)
-        clear_btn.add_widget(MDButtonText(text='Clear Telemetry'))
+        clear_btn = MDButton(
+            style='outlined',
+            theme_width='Custom',
+            size_hint_x=0.5,
+            theme_bg_color='Custom',
+            md_bg_color=(0.1, 0.12, 0.18, 0.3),
+            line_color=(0.25, 0.32, 0.45, 0.35)
+        )
+        clear_btn_text = MDButtonText(text='Clear Telemetry')
+        clear_btn_text.theme_text_color = 'Custom'
+        clear_btn_text.text_color = (0.65, 0.79, 0.92, 1)
+        clear_btn.add_widget(clear_btn_text)
         clear_btn.bind(on_release=self.clear_telemetry)
         
         buttons_layout.add_widget(export_btn)
@@ -1023,8 +1176,17 @@ class DiagnosticsScreen(MDScreen):
             spacing=dp(10),
             padding=dp(10)
         )
-        self.toggle_btn = MDButton(style='elevated', size_hint_x=1)
+        self.toggle_btn = MDButton(
+            style='outlined',
+            theme_width='Custom',
+            size_hint_x=1,
+            theme_bg_color='Custom',
+            md_bg_color=(0.1, 0.12, 0.18, 0.3),
+            line_color=(0.25, 0.32, 0.45, 0.35)
+        )
         self.toggle_btn_text = MDButtonText(text='View Mesh Graph')
+        self.toggle_btn_text.theme_text_color = 'Custom'
+        self.toggle_btn_text.text_color = (0.65, 0.79, 0.92, 1)
         self.toggle_btn.add_widget(self.toggle_btn_text)
         self.toggle_btn.bind(on_release=self.toggle_view)
         toggle_layout.add_widget(self.toggle_btn)
@@ -1306,6 +1468,7 @@ class RadarScreen(MDScreen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.name = 'radar'
+        apply_premium_background(self)
         self.sos_long_press_time = 0
         self.sos_button = None
         self.gps_manager = get_gps_manager()
@@ -1352,6 +1515,8 @@ class RadarScreen(MDScreen):
         
         settings_btn = MDIconButton(
             icon='cog',
+            theme_icon_color='Custom',
+            icon_color=(0.65, 0.79, 0.92, 1),
             size_hint_x=None,
             width=dp(48),
             pos_hint={'center_y': 0.5}
@@ -1360,6 +1525,8 @@ class RadarScreen(MDScreen):
         
         map_btn = MDIconButton(
             icon='map',
+            theme_icon_color='Custom',
+            icon_color=(0.65, 0.79, 0.92, 1),
             size_hint_x=None,
             width=dp(48),
             pos_hint={'center_y': 0.5}
@@ -1368,6 +1535,8 @@ class RadarScreen(MDScreen):
         
         notes_btn = MDIconButton(
             icon='note-text',
+            theme_icon_color='Custom',
+            icon_color=(0.65, 0.79, 0.92, 1),
             size_hint_x=None,
             width=dp(48),
             pos_hint={'center_y': 0.5}
@@ -1412,7 +1581,7 @@ class RadarScreen(MDScreen):
         )
         self.tabs_layout = tabs_layout
         
-        tab_buttons_layout = MDBoxLayout(
+        self.tab_buttons_layout = tab_buttons_layout = MDBoxLayout(
             orientation='horizontal',
             size_hint_y=None,
             height=dp(48),
@@ -1421,11 +1590,14 @@ class RadarScreen(MDScreen):
         )
         
         self.active_tab_btn = MDButton(
-            style='elevated',
+            style='text',
             theme_width='Custom',
             size_hint_x=0.5
         )
-        self.active_tab_btn.add_widget(MDButtonText(text="Active Peers"))
+        act_text = MDButtonText(text="Active Peers")
+        act_text.theme_text_color = 'Custom'
+        act_text.text_color = (0.65, 0.79, 0.92, 1)
+        self.active_tab_btn.add_widget(act_text)
         self.active_tab_btn.bind(on_release=self.show_active_peers)
         
         self.saved_tab_btn = MDButton(
@@ -1433,8 +1605,14 @@ class RadarScreen(MDScreen):
             theme_width='Custom',
             size_hint_x=0.5
         )
-        self.saved_tab_btn.add_widget(MDButtonText(text="Saved Peers"))
+        saved_text = MDButtonText(text="Saved Peers")
+        saved_text.theme_text_color = 'Secondary'
+        self.saved_tab_btn.add_widget(saved_text)
         self.saved_tab_btn.bind(on_release=self.show_saved_peers)
+        
+        # Bind tab buttons size/position changes to update underline indicator dynamically
+        self.active_tab_btn.bind(pos=lambda *a: self.update_tab_buttons(), size=lambda *a: self.update_tab_buttons())
+        self.saved_tab_btn.bind(pos=lambda *a: self.update_tab_buttons(), size=lambda *a: self.update_tab_buttons())
         
         tab_buttons_layout.add_widget(self.active_tab_btn)
         tab_buttons_layout.add_widget(self.saved_tab_btn)
@@ -1459,6 +1637,7 @@ class RadarScreen(MDScreen):
         self.current_tab = 'active'
         self.peers_scroll.opacity = 1
         self.saved_peers_scroll.opacity = 0
+        self.update_tab_buttons()
         
         # Only add the active tab scroll view initially
         tabs_layout.add_widget(self.peers_scroll)
@@ -1506,6 +1685,7 @@ class RadarScreen(MDScreen):
     
     def update_peers(self, peers_dict):
         """Update the peers list (called from main thread via Clock)."""
+        self.radar.update_peers(peers_dict)
         self.peers_list.clear_widgets()
         
         if not peers_dict:
@@ -1532,15 +1712,21 @@ class RadarScreen(MDScreen):
                 else:
                     route_text = f"Route: via {len(visible_peers)} peers"
             
-            item = MDCard(
-                style='elevated',
-                padding=dp(10),
+            item = MDBoxLayout(
+                orientation='horizontal',
+                spacing=dp(10),
                 size_hint_y=None,
                 height=item_height,
-                md_bg_color=(0.1, 0.1, 0.15, 1)
+                padding=[dp(12), dp(8), dp(12), dp(8)]
             )
             
-            item_layout = MDBoxLayout(orientation='horizontal', spacing=dp(10))
+            with item.canvas.after:
+                Color(0.2, 0.25, 0.35, 0.2)
+                item.divider_line = Line(points=[item.x, item.y, item.x + item.width, item.y], width=1)
+                
+            def _update_div(inst, val):
+                inst.divider_line.points = [inst.x, inst.y, inst.x + inst.width, inst.y]
+            item.bind(pos=_update_div, size=_update_div)
             
             peer_info = MDBoxLayout(orientation='vertical', size_hint_x=0.8)
             peer_name = MDLabel(
@@ -1571,13 +1757,14 @@ class RadarScreen(MDScreen):
                 style='text',
                 size_hint_x=0.2
             )
-            chat_btn.add_widget(MDButtonText(text="Chat"))
+            chat_btn_text = MDButtonText(text="Chat")
+            chat_btn_text.theme_text_color = 'Custom'
+            chat_btn_text.text_color = (0.65, 0.79, 0.92, 1) # Ice-Blue
+            chat_btn.add_widget(chat_btn_text)
             chat_btn.bind(on_release=lambda x, ip=ip, name=username: self.open_chat(ip, name))
             
-            item_layout.add_widget(peer_info)
-            item_layout.add_widget(chat_btn)
-            item.add_widget(item_layout)
-            
+            item.add_widget(peer_info)
+            item.add_widget(chat_btn)
             self.peers_list.add_widget(item)
     
     def open_chat(self, peer_ip, peer_name):
@@ -1643,12 +1830,7 @@ class RadarScreen(MDScreen):
             self.tabs_layout.add_widget(self.peers_scroll)
             
         self.peers_scroll.opacity = 1
-        
-        try:
-            self.active_tab_btn.style = 'elevated'
-            self.saved_tab_btn.style = 'text'
-        except:
-            pass
+        self.update_tab_buttons()
      
     def show_saved_peers(self, *args):
         """Switch to saved peers tab and load from database."""
@@ -1663,14 +1845,41 @@ class RadarScreen(MDScreen):
             self.tabs_layout.add_widget(self.saved_peers_scroll)
             
         self.saved_peers_scroll.opacity = 1
-        
+        self.update_tab_buttons()
+        self.load_saved_peers()
+
+    def update_tab_buttons(self):
+        if not hasattr(self, 'tab_buttons_layout'):
+            return
         try:
             self.active_tab_btn.style = 'text'
-            self.saved_tab_btn.style = 'elevated'
-        except:
-            pass
-        
-        self.load_saved_peers()
+            self.saved_tab_btn.style = 'text'
+            
+            if self.current_tab == 'active':
+                for child in self.active_tab_btn.children:
+                    if isinstance(child, MDButtonText):
+                        child.theme_text_color = 'Custom'
+                        child.text_color = (0.65, 0.79, 0.92, 1)
+                for child in self.saved_tab_btn.children:
+                    if isinstance(child, MDButtonText):
+                        child.theme_text_color = 'Secondary'
+            else:
+                for child in self.active_tab_btn.children:
+                    if isinstance(child, MDButtonText):
+                        child.theme_text_color = 'Secondary'
+                for child in self.saved_tab_btn.children:
+                    if isinstance(child, MDButtonText):
+                        child.theme_text_color = 'Custom'
+                        child.text_color = (0.65, 0.79, 0.92, 1)
+            
+            # Redraw bottom underline on tab_buttons_layout canvas
+            self.tab_buttons_layout.canvas.after.clear()
+            with self.tab_buttons_layout.canvas.after:
+                Color(0.65, 0.79, 0.92, 1) # Ice-Blue
+                active_btn = self.active_tab_btn if self.current_tab == 'active' else self.saved_tab_btn
+                Line(points=[active_btn.x, self.tab_buttons_layout.y, active_btn.x + active_btn.width, self.tab_buttons_layout.y], width=dp(2))
+        except Exception as e:
+            print(f"Tab button styling error: {e}")
     
     def load_saved_peers(self):
         """Load and display saved peers from persistence database."""
@@ -1711,15 +1920,21 @@ class RadarScreen(MDScreen):
                 last_seen_dt = datetime.fromtimestamp(last_seen_ts)
                 last_seen_str = last_seen_dt.strftime("%a %H:%M")
                 
-                item = MDCard(
-                    style='elevated',
-                    padding=dp(10),
+                item = MDBoxLayout(
+                    orientation='horizontal',
+                    spacing=dp(10),
                     size_hint_y=None,
                     height=dp(70),
-                    md_bg_color=(0.1, 0.1, 0.15, 1)
+                    padding=[dp(12), dp(8), dp(12), dp(8)]
                 )
                 
-                item_layout = MDBoxLayout(orientation='horizontal', spacing=dp(10))
+                with item.canvas.after:
+                    Color(0.2, 0.25, 0.35, 0.2)
+                    item.divider_line = Line(points=[item.x, item.y, item.x + item.width, item.y], width=1)
+                    
+                def _update_div(inst, val):
+                    inst.divider_line.points = [inst.x, inst.y, inst.x + inst.width, inst.y]
+                item.bind(pos=_update_div, size=_update_div)
                 
                 peer_info = MDBoxLayout(orientation='vertical', size_hint_x=0.75)
                 peer_name = MDLabel(
@@ -1748,12 +1963,14 @@ class RadarScreen(MDScreen):
                     style='text',
                     size_hint_x=0.25
                 )
-                chat_btn.add_widget(MDButtonText(text="Connect"))
+                chat_btn_text = MDButtonText(text="Connect")
+                chat_btn_text.theme_text_color = 'Custom'
+                chat_btn_text.text_color = (0.65, 0.79, 0.92, 1) # Ice-Blue
+                chat_btn.add_widget(chat_btn_text)
                 chat_btn.bind(on_release=lambda x, ip=peer_id, name=device_name: self.open_chat(ip, name))
                 
-                item_layout.add_widget(peer_info)
-                item_layout.add_widget(chat_btn)
-                item.add_widget(item_layout)
+                item.add_widget(peer_info)
+                item.add_widget(chat_btn)
                 
                 self.saved_peers_list.add_widget(item)
         
@@ -1906,20 +2123,24 @@ class MessageBubble(MDCard):
     def __init__(self, message, timestamp, is_sent=False, **kwargs):
         super().__init__(**kwargs)
         
-        self.style = 'elevated'
+        self.style = 'outlined'
         self.adaptive_height = True  # ✅ Adapt to content
         self.size_hint_y = None
-        self.minimum_height = dp(60)  # Minimum height for small messages
-        self.padding = dp(10)
-        self.spacing = dp(5)
+        self.minimum_height = dp(50)  # Minimum height for small messages
+        self.padding = dp(12)
+        self.spacing = dp(4)
         
-        # Color coding: sent (blue) vs received (grey)
+        # Color coding: sent (indigo-blue) vs received (slate-obsidian)
         if is_sent:
-            self.md_bg_color = (0.2, 0.4, 0.8, 1)
+            self.md_bg_color = (0.18, 0.3, 0.5, 0.7)
+            self.line_color = (0.3, 0.45, 0.6, 0.35)
+            self.radius = [dp(16), dp(16), dp(2), dp(16)]
             self.pos_hint = {'right': 0.95}
             self.size_hint_x = 0.75  # Slightly wider for better text flow
         else:
-            self.md_bg_color = (0.3, 0.3, 0.3, 1)
+            self.md_bg_color = (0.08, 0.1, 0.14, 0.6)
+            self.line_color = (0.2, 0.25, 0.35, 0.25)
+            self.radius = [dp(16), dp(16), dp(16), dp(2)]
             self.pos_hint = {'x': 0.05}
             self.size_hint_x = 0.75
         
@@ -1969,18 +2190,22 @@ class FileBubble(MDCard):
         self.is_sent = is_sent
         self.progress = 0.0
         
-        self.style = 'elevated'
+        self.style = 'outlined'
         self.adaptive_height = True
         self.size_hint_y = None
-        self.minimum_height = dp(120)
-        self.padding = dp(10)
+        self.minimum_height = dp(110)
+        self.padding = dp(12)
         
         if is_sent:
-            self.md_bg_color = (0.2, 0.4, 0.8, 1)
+            self.md_bg_color = (0.18, 0.3, 0.5, 0.7)
+            self.line_color = (0.3, 0.45, 0.6, 0.35)
+            self.radius = [dp(16), dp(16), dp(2), dp(16)]
             self.pos_hint = {'right': 0.95}
             self.size_hint_x = 0.75
         else:
-            self.md_bg_color = (0.3, 0.3, 0.3, 1)
+            self.md_bg_color = (0.08, 0.1, 0.14, 0.6)
+            self.line_color = (0.2, 0.25, 0.35, 0.25)
+            self.radius = [dp(16), dp(16), dp(16), dp(2)]
             self.pos_hint = {'x': 0.05}
             self.size_hint_x = 0.75
         
@@ -2121,18 +2346,22 @@ class AudioBubble(MDCard):
         self.is_playing = False
         self.playback_progress = 0.0
         
-        self.style = 'elevated'
+        self.style = 'outlined'
         self.adaptive_height = True
         self.size_hint_y = None
-        self.minimum_height = dp(100)
-        self.padding = dp(10)
+        self.minimum_height = dp(90)
+        self.padding = dp(12)
         
         if is_sent:
-            self.md_bg_color = (0.2, 0.4, 0.8, 1)
+            self.md_bg_color = (0.18, 0.3, 0.5, 0.7)
+            self.line_color = (0.3, 0.45, 0.6, 0.35)
+            self.radius = [dp(16), dp(16), dp(2), dp(16)]
             self.pos_hint = {'right': 0.95}
             self.size_hint_x = 0.75
         else:
-            self.md_bg_color = (0.3, 0.3, 0.3, 1)
+            self.md_bg_color = (0.08, 0.1, 0.14, 0.6)
+            self.line_color = (0.2, 0.25, 0.35, 0.25)
+            self.radius = [dp(16), dp(16), dp(16), dp(2)]
             self.pos_hint = {'x': 0.05}
             self.size_hint_x = 0.75
         
@@ -2249,6 +2478,7 @@ class ChatScreen(MDScreen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.name = 'chat'
+        apply_premium_background(self)
         self.file_manager = None
         self.keyboard_height = 0
         self.received_file_bubbles = {}
@@ -2269,10 +2499,14 @@ class ChatScreen(MDScreen):
             height=dp(60),
             padding=dp(10),
             spacing=dp(10),
-            md_bg_color=(0.08, 0.08, 0.1, 1)
+            md_bg_color=(0.1, 0.12, 0.18, 0.65)
         )
         
-        back_btn = MDIconButton(icon='arrow-left')
+        back_btn = MDIconButton(
+            icon='arrow-left',
+            theme_icon_color='Custom',
+            icon_color=(0.65, 0.79, 0.92, 1)
+        )
         back_btn.bind(on_release=self.go_back)
         
         self.peer_label = MDLabel(
@@ -2286,7 +2520,7 @@ class ChatScreen(MDScreen):
         self.ttl_btn = MDIconButton(
             icon='clock-outline',
             theme_icon_color='Custom',
-            icon_color=(0.5, 0.5, 0.5, 1),
+            icon_color=(0.65, 0.79, 0.92, 1),
             pos_hint={'center_y': 0.5}
         )
         self.ttl_btn.bind(on_release=self.toggle_ttl)
@@ -2325,22 +2559,28 @@ class ChatScreen(MDScreen):
         self.chat_container.add_widget(self.messages_scroll)
         layout.add_widget(self.chat_container)
         
-        # Input area with keyboard awareness
-        self.input_layout = MDBoxLayout(
+        # Input area with keyboard awareness - styled as a modern floating capsule card
+        self.input_layout = MDCard(
             orientation='horizontal',
+            style='outlined',
             adaptive_height=True,
-            minimum_height=dp(60),
-            padding=dp(10),
-            spacing=dp(10),
+            minimum_height=dp(50),
+            padding=[dp(12), dp(4), dp(12), dp(4)],
+            spacing=dp(8),
             size_hint_y=None,
-            pos_hint={'x': 0, 'bottom': 0}
+            md_bg_color=(0.1, 0.12, 0.18, 0.65),
+            line_color=(0.25, 0.32, 0.45, 0.35),
+            radius=[dp(24), dp(24), dp(24), dp(24)]
         )
         
         # Attachment button
         attach_btn = MDIconButton(
             icon='paperclip',
+            theme_icon_color='Custom',
+            icon_color=(0.65, 0.79, 0.92, 1),
             size_hint_x=None,
-            width=dp(48)
+            width=dp(40),
+            pos_hint={'center_y': 0.5}
         )
         attach_btn.bind(on_release=self.open_file_picker)
         
@@ -2348,27 +2588,36 @@ class ChatScreen(MDScreen):
             mode='outlined',
             size_hint_x=0.55,
             size_hint_y=None,
-            height=dp(50)
+            height=dp(36),
+            pos_hint={'center_y': 0.5}
         )
         self.message_input.add_widget(MDTextFieldHintText(text="Type a message..."))
         
         self.mic_btn = MDIconButton(
             icon='microphone',
             theme_icon_color='Custom',
-            icon_color=(0.5, 0.5, 0.5, 1),
+            icon_color=(0.65, 0.79, 0.92, 1),
             size_hint_x=None,
-            width=dp(48)
+            width=dp(40),
+            pos_hint={'center_y': 0.5}
         )
         self.mic_btn.bind(on_touch_down=self.on_mic_touch_down)
         self.mic_btn.bind(on_touch_up=self.on_mic_touch_up)
         
         send_btn = MDButton(
-            style='elevated',
+            style='filled',
+            theme_width='Custom',
             size_hint_x=0.2,
             size_hint_y=None,
-            height=dp(50)
+            height=dp(36),
+            pos_hint={'center_y': 0.5},
+            theme_bg_color='Custom',
+            md_bg_color=(0.65, 0.79, 0.92, 1)
         )
-        send_btn.add_widget(MDButtonText(text="Send"))
+        send_text = MDButtonText(text="Send")
+        send_text.theme_text_color = 'Custom'
+        send_text.text_color = (0.05, 0.06, 0.1, 1)
+        send_btn.add_widget(send_text)
         send_btn.bind(on_release=self.send_message)
         
         self.input_layout.add_widget(attach_btn)
@@ -2776,6 +3025,7 @@ class SettingsScreen(MDScreen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.name = 'settings'
+        apply_premium_background(self)
         self.about_dialog = None
         
         # Main layout
@@ -2789,14 +3039,19 @@ class SettingsScreen(MDScreen):
             spacing=dp(10)
         )
         
-        back_btn = MDIconButton(icon='arrow-left')
+        back_btn = MDIconButton(
+            icon='arrow-left',
+            theme_icon_color='Custom',
+            icon_color=(0.65, 0.79, 0.92, 1)
+        )
         back_btn.bind(on_release=self.go_back)
         
         title = MDLabel(
             text="Settings",
             font_style='Title',
             role='large',
-            theme_text_color='Primary'
+            theme_text_color='Primary',
+            pos_hint={'center_y': 0.5}
         )
         
         header.add_widget(back_btn)
@@ -2815,6 +3070,32 @@ class SettingsScreen(MDScreen):
             spacing=dp(15),
             padding=dp(10)
         )
+        
+        # Unified settings card
+        self.settings_card = MDCard(
+            orientation='vertical',
+            style='outlined',
+            padding=dp(20),
+            spacing=dp(20),
+            size_hint_x=1,
+            adaptive_height=True,
+            md_bg_color=(0.1, 0.12, 0.18, 0.65),
+            line_color=(0.25, 0.32, 0.45, 0.35)
+        )
+        settings_content.add_widget(self.settings_card)
+        
+        # Redirect add_widget to self.settings_card to group sections in a single card
+        original_add_widget = settings_content.add_widget
+        
+        def custom_add_widget(widget, *args, **kwargs):
+            if widget == self.settings_card:
+                original_add_widget(widget, *args, **kwargs)
+            else:
+                if len(self.settings_card.children) > 0:
+                    self.settings_card.add_widget(self._create_divider())
+                self.settings_card.add_widget(widget)
+                
+        settings_content.add_widget = custom_add_widget
         
         # 1. Identity Section
         identity_card = self._create_section_card(
@@ -2836,8 +3117,18 @@ class SettingsScreen(MDScreen):
         )
         self.username_field.add_widget(MDTextFieldHintText(text="Username"))
         
-        username_btn = MDButton(style='elevated')
-        username_btn.add_widget(MDButtonText(text="Update Username"))
+        username_btn = MDButton(
+            style='filled',
+            theme_width='Custom',
+            size_hint_x=None,
+            width=dp(180),
+            theme_bg_color='Custom',
+            md_bg_color=(0.65, 0.79, 0.92, 1)
+        )
+        username_btn_text = MDButtonText(text="Update Username")
+        username_btn_text.theme_text_color = 'Custom'
+        username_btn_text.text_color = (0.05, 0.06, 0.1, 1)
+        username_btn.add_widget(username_btn_text)
         username_btn.bind(on_release=self.update_username)
         
         identity_content.add_widget(self.username_field)
@@ -2939,8 +3230,19 @@ class SettingsScreen(MDScreen):
             padding=dp(10)
         )
         
-        about_btn = MDButton(style='text')
-        about_btn.add_widget(MDButtonText(text="View App Info"))
+        about_btn = MDButton(
+            style='outlined',
+            theme_width='Custom',
+            size_hint_x=None,
+            width=dp(180),
+            theme_bg_color='Custom',
+            md_bg_color=(0.1, 0.12, 0.18, 0.3),
+            line_color=(0.25, 0.32, 0.45, 0.35)
+        )
+        about_btn_text = MDButtonText(text="View App Info")
+        about_btn_text.theme_text_color = 'Custom'
+        about_btn_text.text_color = (0.65, 0.79, 0.92, 1)
+        about_btn.add_widget(about_btn_text)
         about_btn.bind(on_release=self.show_about_dialog)
         
         about_content.add_widget(about_btn)
@@ -2969,8 +3271,19 @@ class SettingsScreen(MDScreen):
             height=dp(30)
         )
         
-        map_select_btn = MDButton(style='elevated')
-        map_select_btn.add_widget(MDButtonText(text="Select .mbtiles File"))
+        map_select_btn = MDButton(
+            style='outlined',
+            theme_width='Custom',
+            size_hint_x=None,
+            width=dp(180),
+            theme_bg_color='Custom',
+            md_bg_color=(0.1, 0.12, 0.18, 0.3),
+            line_color=(0.25, 0.32, 0.45, 0.35)
+        )
+        map_select_text = MDButtonText(text="Select .mbtiles File")
+        map_select_text.theme_text_color = 'Custom'
+        map_select_text.text_color = (0.65, 0.79, 0.92, 1)
+        map_select_btn.add_widget(map_select_text)
         map_select_btn.bind(on_release=self.open_map_file_picker)
         
         map_content.add_widget(self.map_path_label)
@@ -3022,8 +3335,19 @@ class SettingsScreen(MDScreen):
             height=dp(30)
         )
         
-        stego_select_btn = MDButton(style='elevated')
-        stego_select_btn.add_widget(MDButtonText(text="Select Carrier PNG"))
+        stego_select_btn = MDButton(
+            style='outlined',
+            theme_width='Custom',
+            size_hint_x=None,
+            width=dp(180),
+            theme_bg_color='Custom',
+            md_bg_color=(0.1, 0.12, 0.18, 0.3),
+            line_color=(0.25, 0.32, 0.45, 0.35)
+        )
+        stego_select_text = MDButtonText(text="Select Carrier PNG")
+        stego_select_text.theme_text_color = 'Custom'
+        stego_select_text.text_color = (0.65, 0.79, 0.92, 1)
+        stego_select_btn.add_widget(stego_select_text)
         stego_select_btn.bind(on_release=self.open_carrier_file_picker)
         
         stego_content.add_widget(stego_switch_layout)
@@ -3142,8 +3466,18 @@ class SettingsScreen(MDScreen):
         )
         self.new_duress_field.add_widget(MDTextFieldHintText(text="New Duress PIN"))
         
-        pin_btn = MDButton(style='elevated')
-        pin_btn.add_widget(MDButtonText(text="Change PINs"))
+        pin_btn = MDButton(
+            style='filled',
+            theme_width='Custom',
+            size_hint_x=None,
+            width=dp(180),
+            theme_bg_color='Custom',
+            md_bg_color=(0.65, 0.79, 0.92, 1)
+        )
+        pin_btn_text = MDButtonText(text="Change PINs")
+        pin_btn_text.theme_text_color = 'Custom'
+        pin_btn_text.text_color = (0.05, 0.06, 0.1, 1)
+        pin_btn.add_widget(pin_btn_text)
         pin_btn.bind(on_release=self.change_pins_submit)
         
         security_content.add_widget(self.old_pin_field)
@@ -3169,11 +3503,17 @@ class SettingsScreen(MDScreen):
         )
         
         panic_btn = MDButton(
-            style='elevated',
+            style='filled',
+            theme_width='Custom',
+            size_hint_x=None,
+            width=dp(280),
             theme_bg_color='Custom',
             md_bg_color=(0.8, 0.2, 0.2, 1)
         )
-        panic_btn.add_widget(MDButtonText(text="PANIC MODE - Delete All Data"))
+        panic_text = MDButtonText(text="PANIC MODE - Delete All Data")
+        panic_text.theme_text_color = 'Custom'
+        panic_text.text_color = (1, 1, 1, 1)
+        panic_btn.add_widget(panic_text)
         panic_btn.bind(on_release=self.show_panic_confirmation)
         
         danger_hint = MDLabel(
@@ -3195,15 +3535,12 @@ class SettingsScreen(MDScreen):
         self.add_widget(layout)
     
     def _create_section_card(self, title, subtitle, color=None):
-        """Create a section card with title and subtitle."""
-        card = MDCard(
+        """Creates a section container layout instead of a separate card, adding it to self.settings_card."""
+        container = MDBoxLayout(
             orientation='vertical',
-            style='outlined',
-            padding=dp(16),
             spacing=dp(12),
             size_hint_y=None,
-            adaptive_height=True,
-            md_bg_color=color if color else (0.08, 0.08, 0.1, 1)
+            adaptive_height=True
         )
         
         card_layout = MDBoxLayout(
@@ -3221,7 +3558,10 @@ class SettingsScreen(MDScreen):
             size_hint_y=None,
             height=dp(30)
         )
-        
+        if color:
+            title_label.theme_text_color = 'Custom'
+            title_label.text_color = color
+            
         subtitle_label = MDLabel(
             text=subtitle,
             font_style='Body',
@@ -3233,9 +3573,25 @@ class SettingsScreen(MDScreen):
         
         card_layout.add_widget(title_label)
         card_layout.add_widget(subtitle_label)
-        card.add_widget(card_layout)
+        container.add_widget(card_layout)
         
-        return card
+        return container
+
+    def _create_divider(self):
+        """Creates a custom horizontal line separator."""
+        from kivy.uix.widget import Widget
+        divider = Widget(size_hint_y=None, height=dp(1))
+        with divider.canvas.before:
+            from kivy.graphics import Color, Rectangle
+            Color(0.2, 0.25, 0.35, 0.2)
+            divider.rect = Rectangle(pos=divider.pos, size=(divider.width, 1))
+        
+        def _update_rect(instance, value):
+            divider.rect.pos = divider.pos
+            divider.rect.size = (divider.width, 1)
+            
+        divider.bind(pos=_update_rect, size=_update_rect)
+        return divider
     
     def on_pre_enter(self):
         """Load current settings when entering the screen."""
@@ -3687,6 +4043,7 @@ class NotesScreen(MDScreen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.name = 'notes'
+        apply_premium_background(self)
         self.notes_file = "notes.txt"
         
         root_layout = MDFloatLayout(size_hint=(1, 1))
@@ -3707,17 +4064,26 @@ class NotesScreen(MDScreen):
             spacing=dp(10)
         )
         
-        back_btn = MDIconButton(icon='arrow-left')
+        back_btn = MDIconButton(
+            icon='arrow-left',
+            theme_icon_color='Custom',
+            icon_color=(0.65, 0.79, 0.92, 1)
+        )
         back_btn.bind(on_release=self.go_back)
         
         title = MDLabel(
             text='Collaborative Notepad',
             font_style='Title',
             role='large',
-            theme_text_color='Primary'
+            theme_text_color='Primary',
+            pos_hint={'center_y': 0.5}
         )
         
-        sync_btn = MDIconButton(icon='sync')
+        sync_btn = MDIconButton(
+            icon='sync',
+            theme_icon_color='Custom',
+            icon_color=(0.65, 0.79, 0.92, 1)
+        )
         sync_btn.bind(on_release=self.sync_notes)
         
         header.add_widget(back_btn)
@@ -3725,14 +4091,29 @@ class NotesScreen(MDScreen):
         header.add_widget(sync_btn)
         layout.add_widget(header)
         
-        # Multiline text editor for editing notes
-        self.editor = MDTextField(
-            multiline=True,
+        # Glassmorphic card container for editor
+        editor_card = MDCard(
+            style='outlined',
+            padding=dp(8),
             size_hint=(1, 0.9),
-            mode='outlined',
-            theme_text_color='Primary'
+            md_bg_color=(0.1, 0.12, 0.18, 0.65),
+            line_color=(0.25, 0.32, 0.45, 0.35),
+            radius=[dp(12), dp(12), dp(12), dp(12)]
+        )
+        
+        # Multiline text editor for editing notes - borderless inside the card
+        from kivy.uix.textinput import TextInput
+        self.editor = TextInput(
+            multiline=True,
+            size_hint=(1, 1),
+            background_color=(0, 0, 0, 0),
+            foreground_color=(0.95, 0.96, 0.98, 1),
+            cursor_color=(0.65, 0.79, 0.92, 1),
+            font_size='16sp'
         )
         self.editor.bind(text=self.on_text_change)
+        editor_card.add_widget(self.editor)
+        layout.add_widget(editor_card)
         
         root_layout.add_widget(layout)
         self.add_widget(root_layout)
@@ -3832,7 +4213,7 @@ class GhostNetApp(MDApp):
     def build(self):
         """Build the app UI."""
         self.theme_cls.theme_style = "Dark"
-        self.theme_cls.primary_palette = "Blue"
+        self.theme_cls.primary_palette = "Indigo"
         
         sm = MDScreenManager()
         sm.add_widget(LockScreen())
