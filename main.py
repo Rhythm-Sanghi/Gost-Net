@@ -3593,6 +3593,14 @@ class GhostNetApp(MDApp):
         self.service_running = False
         self.notification_manager = None
         self.decoy_mode = False
+        
+    @property
+    def config(self):
+        return get_config()
+        
+    @config.setter
+    def config(self, value):
+        pass
     
     def _start_android_service(self):
         if platform.system() == 'Android':
