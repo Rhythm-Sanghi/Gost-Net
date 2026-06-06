@@ -689,7 +689,7 @@ def test_sos_ed25519_signatures():
     encrypted_unsigned = engine._encrypt_message(json.dumps(unsigned_payload))
     
     engine._handle_sos_message("192.168.1.10", {}, encrypted_unsigned)
-    assert received_sos_name.startswith("⚠️ [UNVERIFIED]"), f"Expected warning prefix, got {received_sos_name}"
+    assert received_sos_name.startswith("[UNVERIFIED]"), f"Expected warning prefix, got {received_sos_name}"
     print("Unverified SOS message: warning prefix prepended successfully.")
     print("SOS Ed25519 Signatures Test: PASSED!\n")
 

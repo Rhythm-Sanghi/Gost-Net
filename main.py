@@ -44,8 +44,8 @@ try:
     from kivymd.uix.boxlayout import MDBoxLayout
     from kivymd.uix.scrollview import MDScrollView
     from kivymd.uix.card import MDCard
-    from kivymd.uix.filemanager import MDFileManager
     from kivymd.uix.slider import MDSlider
+    from kivymd.uix.floatlayout import MDFloatLayout
     
     # Create fallback classes for optional components
     from kivy.uix.widget import Widget as KivyWidget
@@ -244,7 +244,7 @@ class LockScreen(MDScreen):
         )
         
         title = MDLabel(
-            text='🔐 Ghost Net',
+            text='Ghost Net',
             font_style='Title',
             role='large',
             theme_text_color='Primary',
@@ -456,7 +456,7 @@ class MapScreen(MDScreen):
         back_btn.bind(on_release=self.go_back)
         
         title = MDLabel(
-            text='🗺️ Tactical Map',
+            text='Tactical Map',
             font_style='Title',
             role='large',
             theme_text_color='Primary'
@@ -611,10 +611,10 @@ class MapScreen(MDScreen):
         self.selected_marker = marker
         
         if marker.is_user:
-            title_text = '📍 Your Location'
+            title_text = 'Your Location'
             details_text = f'Latitude: {marker.lat:.6f}\nLongitude: {marker.lon:.6f}'
         else:
-            title_text = f'🚨 SOS: {marker.sender_name}'
+            title_text = f'SOS: {marker.sender_name}'
             time_text = marker.timestamp or 'Unknown'
             details_text = f'From: {marker.sender_name}\nTime: {time_text}\nLat: {marker.lat:.6f}\nLon: {marker.lon:.6f}'
         
@@ -692,7 +692,7 @@ class BootScreen(MDScreen):
         
         # App name
         app_name = MDLabel(
-            text="👻 Ghost Net",
+            text="Ghost Net",
             halign='center',
             font_style='Display',
             role='large',
@@ -946,7 +946,7 @@ class DiagnosticsScreen(MDScreen):
         )
         
         title = MDLabel(
-            text='⚙️ DIAGNOSTICS',
+            text='DIAGNOSTICS',
             font_style='Title',
             role='large',
             size_hint_x=0.6
@@ -989,7 +989,7 @@ class DiagnosticsScreen(MDScreen):
             padding=dp(10)
         )
         self.toggle_btn = MDButton(style='elevated', size_hint_x=1)
-        self.toggle_btn_text = MDButtonText(text='📊 View Mesh Graph')
+        self.toggle_btn_text = MDButtonText(text='View Mesh Graph')
         self.toggle_btn.add_widget(self.toggle_btn_text)
         self.toggle_btn.bind(on_release=self.toggle_view)
         toggle_layout.add_widget(self.toggle_btn)
@@ -1027,7 +1027,7 @@ class DiagnosticsScreen(MDScreen):
     def toggle_view(self, *args):
         if self.view_mode == 'list':
             self.view_mode = 'graph'
-            self.toggle_btn_text.text = '📋 View Text Diagnostics'
+            self.toggle_btn_text.text = 'View Text Diagnostics'
             self.scroll.opacity = 0
             self.scroll.size_hint_y = None
             self.scroll.height = 0
@@ -1035,7 +1035,7 @@ class DiagnosticsScreen(MDScreen):
             self.mesh_graph.size_hint_y = 1
         else:
             self.view_mode = 'list'
-            self.toggle_btn_text.text = '📊 View Mesh Graph'
+            self.toggle_btn_text.text = 'View Mesh Graph'
             self.scroll.opacity = 1
             self.scroll.size_hint_y = 1
             self.mesh_graph.opacity = 0
@@ -1277,7 +1277,10 @@ class RadarScreen(MDScreen):
         self.title_tap_times = []
         self.title_widget = None
         
-        layout = MDBoxLayout(orientation='vertical', padding=dp(20), spacing=dp(20))
+        # Root float layout to overlay floating buttons properly
+        root_layout = MDFloatLayout(size_hint=(1, 1))
+        
+        layout = MDBoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15), size_hint=(1, 1))
         
         # Header with title and settings button
         header = MDBoxLayout(
@@ -1288,7 +1291,7 @@ class RadarScreen(MDScreen):
         )
         
         title = MDLabel(
-            text="👻 Ghost Net",
+            text="Ghost Net",
             halign='center',
             font_style='Display',
             role='small',
@@ -1299,7 +1302,7 @@ class RadarScreen(MDScreen):
         
         # Network status badge
         self.network_badge = MDLabel(
-            text="📶 Detecting...",
+            text="Detecting...",
             halign='right',
             font_style='Body',
             role='small',
@@ -1340,7 +1343,9 @@ class RadarScreen(MDScreen):
             halign='center',
             theme_text_color='Secondary',
             font_style='Body',
-            role='large'
+            role='large',
+            size_hint_y=None,
+            height=dp(40)
         )
         layout.add_widget(self.status_label)
         
@@ -1349,6 +1354,7 @@ class RadarScreen(MDScreen):
             size_hint=(1, 1),
             spacing=dp(5)
         )
+        self.tabs_layout = tabs_layout
         
         tab_buttons_layout = MDBoxLayout(
             orientation='horizontal',
@@ -1360,6 +1366,7 @@ class RadarScreen(MDScreen):
         
         self.active_tab_btn = MDButton(
             style='elevated',
+            theme_width='Custom',
             size_hint_x=0.5
         )
         self.active_tab_btn.add_widget(MDButtonText(text="Active Peers"))
@@ -1367,6 +1374,7 @@ class RadarScreen(MDScreen):
         
         self.saved_tab_btn = MDButton(
             style='text',
+            theme_width='Custom',
             size_hint_x=0.5
         )
         self.saved_tab_btn.add_widget(MDButtonText(text="Saved Peers"))
@@ -1396,10 +1404,11 @@ class RadarScreen(MDScreen):
         self.peers_scroll.opacity = 1
         self.saved_peers_scroll.opacity = 0
         
+        # Only add the active tab scroll view initially
         tabs_layout.add_widget(self.peers_scroll)
-        tabs_layout.add_widget(self.saved_peers_scroll)
         
         layout.add_widget(tabs_layout)
+        root_layout.add_widget(layout)
         
         if MDFloatingActionButton:
             self.sos_button = MDFloatingActionButton(
@@ -1412,9 +1421,9 @@ class RadarScreen(MDScreen):
             )
             self.sos_button.bind(on_touch_down=self.on_sos_touch_down)
             self.sos_button.bind(on_touch_up=self.on_sos_touch_up)
-            layout.add_widget(self.sos_button)
-        
-        self.add_widget(layout)
+            root_layout.add_widget(self.sos_button)
+            
+        self.add_widget(root_layout)
     
     def update_network_status(self, network_info):
         """Update network status badge."""
@@ -1424,19 +1433,19 @@ class RadarScreen(MDScreen):
             
             # Icon mapping
             icons = {
-                'wifi': '📶',
-                'hotspot': '📡',
-                'cellular': '📱',
-                'ethernet': '🔌',
-                'private': '🔒',
-                'unknown': '❓'
+                'wifi': 'WiFi',
+                'hotspot': 'Hotspot',
+                'cellular': 'Cellular',
+                'ethernet': 'Ethernet',
+                'private': 'Private',
+                'unknown': 'Unknown'
             }
             
-            icon = icons.get(net_type, '❓')
-            self.network_badge.text = f"{icon} {net_type.capitalize()}"
+            icon = icons.get(net_type, 'Unknown')
+            self.network_badge.text = icon
         except Exception as e:
             print(f"[RadarScreen] Error updating network status: {e}")
-            self.network_badge.text = "❓ Unknown"
+            self.network_badge.text = "Unknown"
     
     def update_peers(self, peers_dict):
         """Update the peers list (called from main thread via Clock)."""
@@ -1454,7 +1463,7 @@ class RadarScreen(MDScreen):
             peer_id = info.get('peer_id', ip)
             battery = info.get('battery')
             if battery is not None:
-                username = f"{username} (🔋 {battery}%)"
+                username = f"{username} ({battery}%)"
             
             item_height = dp(60)
             route_text = None
@@ -1566,20 +1575,36 @@ class RadarScreen(MDScreen):
     
     def show_active_peers(self, *args):
         """Switch to active peers tab."""
+        if self.current_tab == 'active':
+            return
         self.current_tab = 'active'
+        
+        # Dynamically swap scroll views in the layout to ensure correct size allocation
+        if self.saved_peers_scroll in self.tabs_layout.children:
+            self.tabs_layout.remove_widget(self.saved_peers_scroll)
+        if self.peers_scroll not in self.tabs_layout.children:
+            self.tabs_layout.add_widget(self.peers_scroll)
+            
         self.peers_scroll.opacity = 1
-        self.saved_peers_scroll.opacity = 0
         
         try:
             self.active_tab_btn.style = 'elevated'
             self.saved_tab_btn.style = 'text'
         except:
             pass
-    
+     
     def show_saved_peers(self, *args):
         """Switch to saved peers tab and load from database."""
+        if self.current_tab == 'saved':
+            return
         self.current_tab = 'saved'
-        self.peers_scroll.opacity = 0
+        
+        # Dynamically swap scroll views in the layout to ensure correct size allocation
+        if self.peers_scroll in self.tabs_layout.children:
+            self.tabs_layout.remove_widget(self.peers_scroll)
+        if self.saved_peers_scroll not in self.tabs_layout.children:
+            self.tabs_layout.add_widget(self.saved_peers_scroll)
+            
         self.saved_peers_scroll.opacity = 1
         
         try:
@@ -1737,7 +1762,7 @@ class RadarScreen(MDScreen):
             )
             
             title_label = MDLabel(
-                text=f"🚨 EMERGENCY ALERT",
+                text=f"EMERGENCY ALERT",
                 font_style='Title',
                 role='large',
                 theme_text_color='Error',
@@ -1791,7 +1816,7 @@ class RadarScreen(MDScreen):
             content.add_widget(close_btn)
             
             self.alert_dialog = MDDialog(
-                MDDialogHeadlineText(text="⚠️ SOS RECEIVED"),
+                MDDialogHeadlineText(text="SOS RECEIVED"),
                 MDDialogContentContainer(content, orientation="vertical"),
                 MDDialogButtonContainer()
             )
@@ -2318,7 +2343,7 @@ class ChatScreen(MDScreen):
         """Set the current chat peer and load history."""
         self.peer_ip = peer_ip
         self.peer_name = peer_name
-        self.peer_label.text = f"💬 {peer_name}"
+        self.peer_label.text = peer_name
         
         # Clear previous messages
         self.messages_list.clear_widgets()
@@ -2697,7 +2722,7 @@ class SettingsScreen(MDScreen):
         back_btn.bind(on_release=self.go_back)
         
         title = MDLabel(
-            text="⚙️ Settings",
+            text="Settings",
             font_style='Title',
             role='large',
             theme_text_color='Primary'
@@ -2718,7 +2743,7 @@ class SettingsScreen(MDScreen):
         
         # 1. Identity Section
         identity_card = self._create_section_card(
-            "🪪 Identity",
+            "Identity",
             "Manage your display name"
         )
         
@@ -2747,7 +2772,7 @@ class SettingsScreen(MDScreen):
         
         # 2. Privacy Section
         privacy_card = self._create_section_card(
-            "🔒 Privacy",
+            "Privacy",
             "Control data retention and cleanup"
         )
         
@@ -2795,7 +2820,7 @@ class SettingsScreen(MDScreen):
         
         # 3. Appearance Section
         appearance_card = self._create_section_card(
-            "🎨 Appearance",
+            "Appearance",
             "Customize the app look and feel"
         )
         
@@ -2828,7 +2853,7 @@ class SettingsScreen(MDScreen):
         
         # 4. About Section
         about_card = self._create_section_card(
-            "ℹ️ About",
+            "About",
             "App information and credits"
         )
         
@@ -2849,7 +2874,7 @@ class SettingsScreen(MDScreen):
         
         # Map Settings Section
         map_card = self._create_section_card(
-            "🗺️ Map Settings",
+            "Map Settings",
             "Configure offline mapping database"
         )
         
@@ -2881,7 +2906,7 @@ class SettingsScreen(MDScreen):
         
         # Steganography Settings Section
         stego_card = self._create_section_card(
-            "📷 Steganography Settings",
+            "Steganography Settings",
             "Hide messages inside carrier images"
         )
         stego_card.height = dp(180)
@@ -2936,7 +2961,7 @@ class SettingsScreen(MDScreen):
         
         # Anonymity Section
         anonymity_card = self._create_section_card(
-            "🛡️ Advanced Anonymity",
+            "Advanced Anonymity",
             "Configure RAM-only chats & dummy traffic"
         )
         anonymity_card.height = dp(220)
@@ -3010,7 +3035,7 @@ class SettingsScreen(MDScreen):
         
         # Security Section (Change PINs)
         security_card = self._create_section_card(
-            "🔐 Security Settings",
+            "Security Settings",
             "Update authentication PINs"
         )
         security_card.height = dp(310)
@@ -3060,7 +3085,7 @@ class SettingsScreen(MDScreen):
         
         # 5. Danger Zone
         danger_card = self._create_section_card(
-            "⚠️ Danger Zone",
+            "Danger Zone",
             "Irreversible actions",
             color=(0.8, 0.2, 0.2, 1)
         )
@@ -3077,7 +3102,7 @@ class SettingsScreen(MDScreen):
             theme_bg_color='Custom',
             md_bg_color=(0.8, 0.2, 0.2, 1)
         )
-        panic_btn.add_widget(MDButtonText(text="🔥 PANIC MODE - Delete All Data"))
+        panic_btn.add_widget(MDButtonText(text="PANIC MODE - Delete All Data"))
         panic_btn.bind(on_release=self.show_panic_confirmation)
         
         danger_hint = MDLabel(
@@ -3443,7 +3468,7 @@ class SettingsScreen(MDScreen):
             dialog.dismiss()
             
             second_dialog = MDDialog(
-                MDDialogHeadlineText(text="⚠️ FINAL WARNING"),
+                MDDialogHeadlineText(text="FINAL WARNING"),
                 MDDialogContentContainer(
                     MDLabel(
                         text="This action is IRREVERSIBLE!\n\nAll messages, files, encryption keys, and config will be permanently deleted.\n\nAre you ABSOLUTELY sure?",
@@ -3478,7 +3503,7 @@ class SettingsScreen(MDScreen):
 
         def _make_first_dialog():
             d = MDDialog(
-                MDDialogHeadlineText(text="⚠️ Activate Panic Mode?"),
+                MDDialogHeadlineText(text="Activate Panic Mode?"),
                 MDDialogContentContainer(
                     MDLabel(
                         text="This will delete ALL data:\n• All messages\n• All files\n• Encryption keys\n• App configuration\n\nThe app will exit immediately.",
@@ -3599,7 +3624,7 @@ class NotesScreen(MDScreen):
         back_btn.bind(on_release=self.go_back)
         
         title = MDLabel(
-            text='📝 Collaborative Notepad',
+            text='Collaborative Notepad',
             font_style='Title',
             role='large',
             theme_text_color='Primary'

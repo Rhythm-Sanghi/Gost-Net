@@ -777,7 +777,7 @@ class GhostEngine:
                     timestamp = datetime.now().strftime("%H:%M:%S")
                     
                     if self.on_message_received:
-                        msg = f"📖 [Wiki Result from {responder} for '{query}']: {response}"
+                        msg = f"[Wiki Result from {responder} for '{query}']: {response}"
                         self.on_message_received(sender_ip, msg, timestamp)
                     
                     if self.persistence_db:
@@ -1023,7 +1023,7 @@ class GhostEngine:
         try:
             message_text = header.get("content", "")
             if header.get("stego"):
-                message_text = "🔓 [Stego Image Decoded] " + message_text
+                message_text = "[Stego Image Decoded] " + message_text
             timestamp = datetime.now().strftime("%H:%M:%S")
             timestamp_unix = time.time()
             ttl = header.get("ttl")
@@ -1297,8 +1297,8 @@ class GhostEngine:
             
             if not verified:
                 sender_name = sos_payload.get('sender_name', 'Unknown')
-                if not sender_name.startswith("⚠️ [UNVERIFIED]"):
-                    sos_payload['sender_name'] = f"⚠️ [UNVERIFIED] {sender_name}"
+                if not sender_name.startswith("[UNVERIFIED]"):
+                    sos_payload['sender_name'] = f"[UNVERIFIED] {sender_name}"
             
             sos_id = sos_payload.get('sos_id')
             from_peer = sos_payload.get('sender_id')

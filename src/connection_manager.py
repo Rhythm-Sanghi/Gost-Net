@@ -402,7 +402,7 @@ class ConnectionManager:
                         message = str(decrypted_data)
 
                     if is_stego:
-                        message = "🔓 [Stego Image Decoded] " + message
+                        message = "[Stego Image Decoded] " + message
 
                     import time as time_module
                     timestamp = time_module.strftime("%H:%M:%S")
