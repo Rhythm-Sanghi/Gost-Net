@@ -115,11 +115,29 @@ def test_epidemic_dtn_routing():
         time.sleep(0.1)
         
     assert os.path.exists(target_spool_dir), "Spool dir not created"
+    
+    # Wait for the item directory to contain spooled files
+    start_time = time.time()
+    while not os.listdir(target_spool_dir) and time.time() - start_time < 3.0:
+        time.sleep(0.1)
+        
     item_id = os.listdir(target_spool_dir)[0]
     meta_path = os.path.join(target_spool_dir, item_id, "metadata.json")
     data_path = os.path.join(target_spool_dir, item_id, "file.dat")
+    
+    # Wait for the metadata file to be fully written
+    start_time = time.time()
+    while not os.path.exists(meta_path) and time.time() - start_time < 3.0:
+        time.sleep(0.1)
+        
     meta = engine._read_spool_metadata(meta_path)
-    assert meta["replicated_to"] == [], "Initial replicated_to list should be empty"
+    # If encryption or file-locking is in progress, retry once
+    if meta is None:
+        time.sleep(0.2)
+        meta = engine._read_spool_metadata(meta_path)
+        
+    assert meta is not None, "Metadata file could not be read"
+    assert meta.get("replicated_to") == [], "Initial replicated_to list should be empty"
     print("File successfully spooled with empty replicated_to list.")
     
     # 2. Add a reachable candidate carrier peer

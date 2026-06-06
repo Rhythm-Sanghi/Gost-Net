@@ -236,26 +236,46 @@ class LockScreen(MDScreen):
         self.auth_manager = AuthenticationManager()
         self.shredding_in_progress = False
         
-        layout = MDBoxLayout(
+        root_layout = MDFloatLayout(size_hint=(1, 1))
+        
+        # Modern centered card container
+        card = MDCard(
             orientation='vertical',
-            padding=dp(20),
-            spacing=dp(20),
-            size_hint=(1, 1)
+            style='outlined',
+            size_hint=(None, None),
+            size=(dp(360), dp(380)),
+            pos_hint={'center_x': 0.5, 'center_y': 0.5},
+            padding=dp(24),
+            spacing=dp(24),
+            md_bg_color=(0.08, 0.08, 0.1, 1)
+        )
+        
+        # Clean typography brand area
+        brand_layout = MDBoxLayout(
+            orientation='vertical',
+            spacing=dp(4),
+            size_hint_y=None,
+            height=dp(60)
         )
         
         title = MDLabel(
             text='Ghost Net',
-            font_style='Title',
-            role='large',
+            font_style='Headline',
+            role='medium',
             theme_text_color='Primary',
-            halign='center',
-            size_hint_y=None,
-            height=dp(80)
+            halign='center'
         )
-        layout.add_widget(title)
         
-        spacer1 = MDLabel(size_hint_y=0.2)
-        layout.add_widget(spacer1)
+        subtitle = MDLabel(
+            text='Secure Mesh Messaging',
+            font_style='Body',
+            role='small',
+            theme_text_color='Secondary',
+            halign='center'
+        )
+        brand_layout.add_widget(title)
+        brand_layout.add_widget(subtitle)
+        card.add_widget(brand_layout)
         
         self.pin_field = MDTextField(
             mode='outlined',
@@ -267,34 +287,30 @@ class LockScreen(MDScreen):
         )
         self.pin_field.add_widget(MDTextFieldHintText(text="Enter PIN"))
         self.pin_field.add_widget(MDTextFieldHelperText(text="Default Master PIN is 1234", mode="persistent"))
-        layout.add_widget(self.pin_field)
+        card.add_widget(self.pin_field)
         
-        button_layout = MDBoxLayout(
-            orientation='horizontal',
-            spacing=dp(10),
-            size_hint_y=None,
-            height=dp(50)
+        submit_btn = MDButton(
+            style='filled',
+            theme_width='Custom',
+            size_hint_x=1
         )
-        
-        submit_btn = MDButton(MDButtonText(text='Unlock'))
+        submit_btn.add_widget(MDButtonText(text='Unlock'))
         submit_btn.bind(on_release=self.on_pin_submit)
-        button_layout.add_widget(submit_btn)
-        
-        layout.add_widget(button_layout)
-        
-        spacer2 = MDLabel(size_hint_y=None, height=dp(20))
-        layout.add_widget(spacer2)
+        card.add_widget(submit_btn)
         
         self.status_label = MDLabel(
             text='',
             theme_text_color='Secondary',
             halign='center',
+            font_style='Body',
+            role='small',
             size_hint_y=None,
-            height=dp(40)
+            height=dp(30)
         )
-        layout.add_widget(self.status_label)
+        card.add_widget(self.status_label)
         
-        self.add_widget(layout)
+        root_layout.add_widget(card)
+        self.add_widget(root_layout)
     
     def on_pin_submit(self, *args):
         pin = self.pin_field.text.strip()
@@ -676,28 +692,37 @@ class BootScreen(MDScreen):
         super().__init__(**kwargs)
         self.name = 'boot'
         
-        # Main layout
-        layout = MDBoxLayout(orientation='vertical', padding=dp(20))
+        root_layout = MDFloatLayout(size_hint=(1, 1))
+        
+        # Modern centered layout container
+        layout = MDBoxLayout(
+            orientation='vertical',
+            size_hint=(None, 1),
+            width=dp(360),
+            pos_hint={'center_x': 0.5},
+            padding=dp(20),
+            spacing=dp(20)
+        )
         
         # Spacer
-        layout.add_widget(Widget(size_hint_y=0.3))
+        layout.add_widget(Widget(size_hint_y=0.25))
         
         # Logo/Ghost animation area
         logo_area = MDBoxLayout(
             orientation='vertical',
             size_hint_y=None,
             height=dp(300),
-            spacing=dp(20)
+            spacing=dp(24)
         )
         
         # App name
         app_name = MDLabel(
             text="Ghost Net",
             halign='center',
-            font_style='Display',
+            font_style='Headline',
             role='large',
             size_hint_y=None,
-            height=dp(80)
+            height=dp(60)
         )
         
         # Tagline
@@ -705,16 +730,16 @@ class BootScreen(MDScreen):
             text="Secure • Offline • Free",
             halign='center',
             theme_text_color='Secondary',
-            font_style='Title',
+            font_style='Body',
             role='medium',
             size_hint_y=None,
-            height=dp(40)
+            height=dp(30)
         )
         
         # Loading spinner
         self.spinner = MDSpinner(
             size_hint=(None, None),
-            size=(dp(46), dp(46)),
+            size=(dp(40), dp(40)),
             pos_hint={'center_x': 0.5},
             active=True
         )
@@ -738,7 +763,7 @@ class BootScreen(MDScreen):
         layout.add_widget(logo_area)
         
         # Spacer
-        layout.add_widget(Widget(size_hint_y=0.3))
+        layout.add_widget(Widget(size_hint_y=0.25))
         
         # Version info at bottom
         version_label = MDLabel(
@@ -752,7 +777,8 @@ class BootScreen(MDScreen):
         )
         layout.add_widget(version_label)
         
-        self.add_widget(layout)
+        root_layout.add_widget(layout)
+        self.add_widget(root_layout)
     
     def update_status(self, text):
         """Update the status label text."""
@@ -936,7 +962,16 @@ class DiagnosticsScreen(MDScreen):
         self.export_status_label = None
         self.view_mode = 'list'
         
-        layout = MDBoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
+        root_layout = MDFloatLayout(size_hint=(1, 1))
+        
+        layout = MDBoxLayout(
+            orientation='vertical',
+            padding=dp(10),
+            spacing=dp(10),
+            size_hint=(None, 1),
+            width=dp(600),
+            pos_hint={'center_x': 0.5}
+        )
         
         header = MDBoxLayout(
             orientation='horizontal',
@@ -1022,7 +1057,8 @@ class DiagnosticsScreen(MDScreen):
         self.mesh_graph.height = 0
         layout.add_widget(self.mesh_graph)
         
-        self.add_widget(layout)
+        root_layout.add_widget(layout)
+        self.add_widget(root_layout)
         
     def toggle_view(self, *args):
         if self.view_mode == 'list':
@@ -1282,7 +1318,7 @@ class RadarScreen(MDScreen):
         
         layout = MDBoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15), size_hint=(1, 1))
         
-        # Header with title and settings button
+        # Header with title and settings button - modern minimal style
         header = MDBoxLayout(
             orientation='horizontal',
             size_hint_y=None,
@@ -1292,10 +1328,12 @@ class RadarScreen(MDScreen):
         
         title = MDLabel(
             text="Ghost Net",
-            halign='center',
-            font_style='Display',
-            role='small',
-            size_hint_x=0.5
+            halign='left',
+            font_style='Headline',
+            role='medium',
+            size_hint_x=None,
+            width=dp(150),
+            pos_hint={'center_y': 0.5}
         )
         title.bind(on_touch_down=self.on_title_tap)
         self.title_widget = title
@@ -1307,36 +1345,54 @@ class RadarScreen(MDScreen):
             font_style='Body',
             role='small',
             theme_text_color='Secondary',
-            size_hint_x=0.2
+            size_hint_x=None,
+            width=dp(100),
+            pos_hint={'center_y': 0.5}
         )
         
         settings_btn = MDIconButton(
             icon='cog',
-            size_hint_x=0.1
+            size_hint_x=None,
+            width=dp(48),
+            pos_hint={'center_y': 0.5}
         )
         settings_btn.bind(on_release=self.open_settings)
         
         map_btn = MDIconButton(
             icon='map',
-            size_hint_x=0.1
+            size_hint_x=None,
+            width=dp(48),
+            pos_hint={'center_y': 0.5}
         )
         map_btn.bind(on_release=self.open_map)
         
         notes_btn = MDIconButton(
             icon='note-text',
-            size_hint_x=0.1
+            size_hint_x=None,
+            width=dp(48),
+            pos_hint={'center_y': 0.5}
         )
         notes_btn.bind(on_release=self.open_notes)
         
         header.add_widget(title)
+        header.add_widget(Widget(size_hint_x=1)) # Spacer to push buttons to the right
         header.add_widget(self.network_badge)
         header.add_widget(map_btn)
         header.add_widget(notes_btn)
         header.add_widget(settings_btn)
         layout.add_widget(header)
         
+        # Centered body container for minimal layout
+        body_container = MDBoxLayout(
+            orientation='vertical',
+            spacing=dp(15),
+            size_hint=(None, 1),
+            width=dp(500),
+            pos_hint={'center_x': 0.5}
+        )
+        
         self.radar = RadarWidget(size_hint=(1, 0.4))
-        layout.add_widget(self.radar)
+        body_container.add_widget(self.radar)
         
         self.status_label = MDLabel(
             text="Scanning for peers...",
@@ -1347,7 +1403,7 @@ class RadarScreen(MDScreen):
             size_hint_y=None,
             height=dp(40)
         )
-        layout.add_widget(self.status_label)
+        body_container.add_widget(self.status_label)
         
         tabs_layout = MDBoxLayout(
             orientation='vertical',
@@ -1406,8 +1462,9 @@ class RadarScreen(MDScreen):
         
         # Only add the active tab scroll view initially
         tabs_layout.add_widget(self.peers_scroll)
+        body_container.add_widget(tabs_layout)
         
-        layout.add_widget(tabs_layout)
+        layout.add_widget(body_container)
         root_layout.add_widget(layout)
         
         if MDFloatingActionButton:
@@ -2207,11 +2264,12 @@ class ChatScreen(MDScreen):
         layout = MDBoxLayout(orientation='vertical', spacing=dp(10))
         
         header = MDBoxLayout(
+            orientation='horizontal',
             size_hint_y=None,
             height=dp(60),
             padding=dp(10),
             spacing=dp(10),
-            md_bg_color=(0.1, 0.1, 0.2, 1)
+            md_bg_color=(0.08, 0.08, 0.1, 1)
         )
         
         back_btn = MDIconButton(icon='arrow-left')
@@ -2219,22 +2277,34 @@ class ChatScreen(MDScreen):
         
         self.peer_label = MDLabel(
             text="Select a peer",
-            font_style='Title',
-            role='large',
-            theme_text_color='Primary'
+            font_style='Headline',
+            role='small',
+            theme_text_color='Primary',
+            pos_hint={'center_y': 0.5}
         )
         
         self.ttl_btn = MDIconButton(
             icon='clock-outline',
             theme_icon_color='Custom',
-            icon_color=(0.5, 0.5, 0.5, 1)
+            icon_color=(0.5, 0.5, 0.5, 1),
+            pos_hint={'center_y': 0.5}
         )
         self.ttl_btn.bind(on_release=self.toggle_ttl)
         
         header.add_widget(back_btn)
         header.add_widget(self.peer_label)
+        header.add_widget(Widget(size_hint_x=1))
         header.add_widget(self.ttl_btn)
         layout.add_widget(header)
+        
+        # Centered chat container for minimal/modern feel
+        self.chat_container = MDBoxLayout(
+            orientation='vertical',
+            size_hint=(None, 1),
+            width=dp(600),
+            pos_hint={'center_x': 0.5},
+            spacing=dp(10)
+        )
         
         # Messages area with improved scrolling
         self.messages_scroll = MDScrollView(
@@ -2252,7 +2322,8 @@ class ChatScreen(MDScreen):
         )
         self.messages_list.bind(minimum_height=self.messages_list.setter('height'))
         self.messages_scroll.add_widget(self.messages_list)
-        layout.add_widget(self.messages_scroll)
+        self.chat_container.add_widget(self.messages_scroll)
+        layout.add_widget(self.chat_container)
         
         # Input area with keyboard awareness
         self.input_layout = MDBoxLayout(
@@ -2304,7 +2375,7 @@ class ChatScreen(MDScreen):
         self.input_layout.add_widget(self.message_input)
         self.input_layout.add_widget(self.mic_btn)
         self.input_layout.add_widget(send_btn)
-        layout.add_widget(self.input_layout)
+        self.chat_container.add_widget(self.input_layout)
         
         self.add_widget(layout)
         
@@ -2732,8 +2803,12 @@ class SettingsScreen(MDScreen):
         header.add_widget(title)
         layout.add_widget(header)
         
-        # Scrollable settings content
-        scroll = MDScrollView(size_hint=(1, 1))
+        # Scrollable settings content - centered and capped to 600dp
+        scroll = MDScrollView(
+            size_hint=(None, 1),
+            width=dp(600),
+            pos_hint={'center_x': 0.5}
+        )
         settings_content = MDBoxLayout(
             orientation='vertical',
             adaptive_height=True,
@@ -2901,7 +2976,6 @@ class SettingsScreen(MDScreen):
         map_content.add_widget(self.map_path_label)
         map_content.add_widget(map_select_btn)
         map_card.add_widget(map_content)
-        map_card.height = dp(140)
         settings_content.add_widget(map_card)
         
         # Steganography Settings Section
@@ -2909,7 +2983,6 @@ class SettingsScreen(MDScreen):
             "Steganography Settings",
             "Hide messages inside carrier images"
         )
-        stego_card.height = dp(180)
         
         stego_content = MDBoxLayout(
             orientation='vertical',
@@ -2964,7 +3037,6 @@ class SettingsScreen(MDScreen):
             "Advanced Anonymity",
             "Configure RAM-only chats & dummy traffic"
         )
-        anonymity_card.height = dp(220)
         
         anonymity_content = MDBoxLayout(
             orientation='vertical',
@@ -3038,7 +3110,6 @@ class SettingsScreen(MDScreen):
             "Security Settings",
             "Update authentication PINs"
         )
-        security_card.height = dp(310)
         
         security_content = MDBoxLayout(
             orientation='vertical',
@@ -3126,14 +3197,21 @@ class SettingsScreen(MDScreen):
     def _create_section_card(self, title, subtitle, color=None):
         """Create a section card with title and subtitle."""
         card = MDCard(
-            style='elevated',
-            padding=dp(15),
+            orientation='vertical',
+            style='outlined',
+            padding=dp(16),
+            spacing=dp(12),
             size_hint_y=None,
-            height=dp(80),
-            md_bg_color=color if color else (0.1, 0.1, 0.15, 1)
+            adaptive_height=True,
+            md_bg_color=color if color else (0.08, 0.08, 0.1, 1)
         )
         
-        card_layout = MDBoxLayout(orientation='vertical', spacing=dp(5))
+        card_layout = MDBoxLayout(
+            orientation='vertical',
+            spacing=dp(4),
+            size_hint_y=None,
+            height=dp(54)
+        )
         
         title_label = MDLabel(
             text=title,
@@ -3611,7 +3689,16 @@ class NotesScreen(MDScreen):
         self.name = 'notes'
         self.notes_file = "notes.txt"
         
-        layout = MDBoxLayout(orientation='vertical', padding=dp(20), spacing=dp(10))
+        root_layout = MDFloatLayout(size_hint=(1, 1))
+        
+        layout = MDBoxLayout(
+            orientation='vertical',
+            padding=dp(20),
+            spacing=dp(10),
+            size_hint=(None, 1),
+            width=dp(600),
+            pos_hint={'center_x': 0.5}
+        )
         
         header = MDBoxLayout(
             orientation='horizontal',
@@ -3647,8 +3734,8 @@ class NotesScreen(MDScreen):
         )
         self.editor.bind(text=self.on_text_change)
         
-        layout.add_widget(self.editor)
-        self.add_widget(layout)
+        root_layout.add_widget(layout)
+        self.add_widget(root_layout)
         
     def on_pre_enter(self):
         # Load local notes when entering the screen
