@@ -58,6 +58,9 @@ class MockBluetooth:
         self.rfcomm_sockets = {}
         self.server_thread = None
         self.server_running = False
+        self.ble_advertising = False
+        self.ble_scanning = False
+        self.ble_scan_thread = None
     
     def enable(self):
         if not _is_android:
@@ -95,11 +98,62 @@ class MockBluetooth:
             print("[MockBluetooth] Listening for RFCOMM connections (mock)")
         
         return None
+        
+    def start_ble_advertising(self, service_uuid: str, device_name: str) -> bool:
+        if not _is_android:
+            print(f"[MockBluetooth] BLE advertising started for UUID: {service_uuid}")
+        self.ble_advertising = True
+        return True
+
+    def stop_ble_advertising(self) -> bool:
+        if not _is_android:
+            print("[MockBluetooth] BLE advertising stopped")
+        self.ble_advertising = False
+        return True
+
+    def start_ble_scanning(self, service_uuid: str, on_device_found) -> bool:
+        if not _is_android:
+            print(f"[MockBluetooth] BLE scan started for UUID: {service_uuid}")
+        self.ble_scanning = True
+        
+        def _ble_scan_mock_worker():
+            mock_nodes = [
+                ("aa:bb:cc:dd:ee:f1", "BLE_MeshNode_A", -62),
+                ("aa:bb:cc:dd:ee:f2", "BLE_MeshNode_B", -75)
+            ]
+            while self.ble_scanning:
+                time.sleep(5)
+                for addr, name, rssi in mock_nodes:
+                    if not self.ble_scanning:
+                        break
+                    try:
+                        # Call on_device_found
+                        # To mock device object, we pass a dummy object that implements getAddress()
+                        class DummyDevice:
+                            def __init__(self, address):
+                                self.address = address
+                            def getAddress(self):
+                                return self.address
+                        on_device_found(DummyDevice(addr), rssi, name)
+                    except Exception as e:
+                        print(f"[MockBluetooth] BLE scan callback error: {e}")
+                        
+        self.ble_scan_thread = threading.Thread(target=_ble_scan_mock_worker, daemon=True)
+        self.ble_scan_thread.start()
+        return True
+
+    def stop_ble_scanning(self) -> bool:
+        if not _is_android:
+            print("[MockBluetooth] BLE scan stopped")
+        self.ble_scanning = False
+        return True
     
     def disconnect(self):
         if not _is_android:
             print("[MockBluetooth] Disconnected (mock)")
         self.rfcomm_sockets.clear()
+        self.stop_ble_scanning()
+        self.stop_ble_advertising()
         return True
 
 class MockRFCOMMSocket:

@@ -17,6 +17,7 @@ class TelemetryLogger:
         self.buffer_size = 10
         self.flush_interval = 5.0
         self.last_flush = time.time()
+        self.cipher = None
         
         if data_dir is None:
             if _platform_check.system() == 'Android':
@@ -35,16 +36,13 @@ class TelemetryLogger:
         
         self.csv_path = os.path.join(self.data_dir, 'mission_telemetry.csv')
         self.init_csv()
+
+    def set_cipher(self, cipher):
+        self.cipher = cipher
     
     def init_csv(self):
-        with self.lock:
-            if not os.path.exists(self.csv_path):
-                try:
-                    with open(self.csv_path, 'w', newline='', encoding='utf-8') as f:
-                        writer = csv.writer(f)
-                        writer.writerow(['timestamp', 'event_type', 'peer_id', 'metric', 'status'])
-                except Exception as e:
-                    print(f"[TelemetryLogger] Error initializing CSV: {e}")
+        # Initialized lazily during flush to ensure header is encrypted under the active cipher
+        pass
     
     def log_event(self, event_type: str, peer_id: str = '', metric: str = '', status: str = ''):
         try:
@@ -67,10 +65,33 @@ class TelemetryLogger:
         
         with self.lock:
             try:
-                with open(self.csv_path, 'a', newline='', encoding='utf-8') as f:
-                    writer = csv.writer(f)
+                import io
+                import csv
+                import base64
+                
+                write_header = not os.path.exists(self.csv_path)
+                
+                with open(self.csv_path, 'ab') as f:
+                    if write_header:
+                        header = ['timestamp', 'event_type', 'peer_id', 'metric', 'status']
+                        out = io.StringIO()
+                        writer = csv.writer(out)
+                        writer.writerow(header)
+                        hdr_str = out.getvalue().strip()
+                        if self.cipher:
+                            f.write(self.cipher.encrypt(hdr_str.encode('utf-8')) + b"\n")
+                        else:
+                            f.write(b"BASE64:" + base64.b64encode(hdr_str.encode('utf-8')) + b"\n")
+                            
                     for row in self.buffer:
+                        out = io.StringIO()
+                        writer = csv.writer(out)
                         writer.writerow(row)
+                        row_str = out.getvalue().strip()
+                        if self.cipher:
+                            f.write(self.cipher.encrypt(row_str.encode('utf-8')) + b"\n")
+                        else:
+                            f.write(b"BASE64:" + base64.b64encode(row_str.encode('utf-8')) + b"\n")
                 
                 self.buffer.clear()
                 self.last_flush = time.time()
@@ -105,7 +126,8 @@ class TelemetryLogger:
             try:
                 self.buffer.clear()
                 if os.path.exists(self.csv_path):
-                    os.remove(self.csv_path)
+                    from security import shred_file
+                    shred_file(self.csv_path)
                 self.init_csv()
             except Exception as e:
                 print(f"[TelemetryLogger] Error clearing logs: {e}")

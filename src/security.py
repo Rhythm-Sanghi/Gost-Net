@@ -1,6 +1,6 @@
 import os
 import ctypes
-from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric import ec, ed25519
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.backends import default_backend
@@ -243,32 +243,85 @@ class DoubleRatchetSession:
 
 class CryptoManager:
 
-    def __init__(self):
+    def __init__(self, signing_private_key_bytes: Optional[bytes] = None):
         self.private_key = None
         self.public_key = None
+        self.signing_private_key = None
+        self.signing_public_key = None
         self.peer_keys: Dict[str, bytes] = {}
         self.peer_aes_keys: Dict[str, bytes] = {}
         self.keys_lock = threading.Lock()
-        self._initialize_keys()
+        self._initialize_keys(signing_private_key_bytes)
 
-    def _initialize_keys(self):
+    def _initialize_keys(self, signing_private_key_bytes: Optional[bytes] = None):
+        from datetime import datetime
+        self._key_date = datetime.now().strftime("%Y-%m-%d")
         self.private_key = ec.generate_private_key(
             ec.SECP384R1(),
             backend=default_backend()
         )
         self.public_key = self.private_key.public_key()
+        
+        if signing_private_key_bytes:
+            try:
+                self.signing_private_key = ed25519.Ed25519PrivateKey.from_private_bytes(signing_private_key_bytes)
+                self.signing_public_key = self.signing_private_key.public_key()
+            except Exception as e:
+                print(f"[CryptoManager] Failed to load signing private key: {e}")
+                self.signing_private_key = ed25519.Ed25519PrivateKey.generate()
+                self.signing_public_key = self.signing_private_key.public_key()
+        else:
+            self.signing_private_key = ed25519.Ed25519PrivateKey.generate()
+            self.signing_public_key = self.signing_private_key.public_key()
+
+    def _check_daily_key_rotation(self):
+        from datetime import datetime
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        if not hasattr(self, '_key_date') or self._key_date != current_date:
+            self._key_date = current_date
+            self.private_key = ec.generate_private_key(
+                ec.SECP384R1(),
+                backend=default_backend()
+            )
+            self.public_key = self.private_key.public_key()
+            with self.keys_lock:
+                self.peer_aes_keys.clear()
+            print("[CryptoManager] Daily ECDH keypair rotated successfully")
 
     def get_public_key_bytes(self) -> bytes:
+        self._check_daily_key_rotation()
         return self.public_key.public_bytes(
             encoding=serialization.Encoding.X962,
             format=serialization.PublicFormat.UncompressedPoint
         )
 
+    def get_signing_public_key_bytes(self) -> bytes:
+        return self.signing_public_key.public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw
+        )
+
+    def sign_data(self, data: bytes) -> bytes:
+        if not self.signing_private_key:
+            raise ValueError("Signing key not initialized")
+        return self.signing_private_key.sign(data)
+
+    def verify_signature(self, signature: bytes, data: bytes, public_key_bytes: bytes) -> bool:
+        try:
+            pub_key = ed25519.Ed25519PublicKey.from_public_bytes(public_key_bytes)
+            pub_key.verify(signature, data)
+            return True
+        except Exception as e:
+            print(f"[CryptoManager] Signature verification failed: {e}")
+            return False
+
     def set_peer_public_key(self, peer_id: str, peer_public_key_bytes: bytes):
+        mlock_bytes(peer_public_key_bytes)
         with self.keys_lock:
             self.peer_keys[peer_id] = peer_public_key_bytes
 
     def derive_shared_secret(self, peer_id: str) -> Optional[bytes]:
+        self._check_daily_key_rotation()
         with self.keys_lock:
             if peer_id not in self.peer_keys:
                 return None
@@ -302,6 +355,7 @@ class CryptoManager:
             )
 
             aes_key = hkdf.derive(shared_secret)
+            mlock_bytes(aes_key)
 
             with self.keys_lock:
                 self.peer_aes_keys[peer_id] = aes_key
@@ -421,19 +475,11 @@ class CryptoManager:
         with self.keys_lock:
             try:
                 for peer_id in list(self.peer_keys.keys()):
-                    key_bytes = self.peer_keys[peer_id]
-                    random_data = os.urandom(len(key_bytes))
-                    ctypes_array = (ctypes.c_ubyte * len(key_bytes)).from_address(id(key_bytes))
-                    for i in range(len(key_bytes)):
-                        ctypes_array[i] = random_data[i]
+                    shred_bytes(self.peer_keys[peer_id])
                     del self.peer_keys[peer_id]
 
                 for peer_id in list(self.peer_aes_keys.keys()):
-                    key_bytes = self.peer_aes_keys[peer_id]
-                    random_data = os.urandom(len(key_bytes))
-                    ctypes_array = (ctypes.c_ubyte * len(key_bytes)).from_address(id(key_bytes))
-                    for i in range(len(key_bytes)):
-                        ctypes_array[i] = random_data[i]
+                    shred_bytes(self.peer_aes_keys[peer_id])
                     del self.peer_aes_keys[peer_id]
 
                 if self.private_key:
@@ -444,3 +490,84 @@ class CryptoManager:
                 print("[CryptoManager] All keys shredded successfully")
             except Exception as e:
                 print(f"[CryptoManager] Error shredding keys: {e}")
+
+def shred_bytes(b: bytes):
+    if not isinstance(b, bytes):
+        return
+    munlock_bytes(b)
+    import sys
+    size = len(b)
+    if size > 0:
+        try:
+            offset = 32 if sys.maxsize > 2**32 else 16
+            addr = id(b) + offset
+            ctypes_array = (ctypes.c_ubyte * size).from_address(addr)
+            random_data = os.urandom(size)
+            for i in range(size):
+                ctypes_array[i] = random_data[i]
+            for i in range(size):
+                ctypes_array[i] = 0
+        except Exception as e:
+            print(f"[CryptoManager] Memory shredding warning: {e}")
+
+def mlock_bytes(b: bytes):
+    if not isinstance(b, bytes):
+        return
+    import sys
+    if sys.platform.startswith('linux') or sys.platform == 'android':
+        try:
+            import ctypes
+            libc = ctypes.CDLL(None)
+            size = len(b)
+            if size > 0:
+                offset = 32 if sys.maxsize > 2**32 else 16
+                addr = id(b) + offset
+                res = libc.mlock(addr, size)
+                if res != 0:
+                    print(f"[Security] mlock returned status code {res}")
+        except Exception as e:
+            print(f"[Security] mlock error: {e}")
+
+def munlock_bytes(b: bytes):
+    if not isinstance(b, bytes):
+        return
+    import sys
+    if sys.platform.startswith('linux') or sys.platform == 'android':
+        try:
+            import ctypes
+            libc = ctypes.CDLL(None)
+            size = len(b)
+            if size > 0:
+                offset = 32 if sys.maxsize > 2**32 else 16
+                addr = id(b) + offset
+                res = libc.munlock(addr, size)
+                if res != 0:
+                    print(f"[Security] munlock returned status code {res}")
+        except Exception as e:
+            print(f"[Security] munlock error: {e}")
+
+def shred_file(filepath: str):
+    """
+    Securely shred a file by overwriting it with random bytes and zeros before deleting.
+    """
+    if not os.path.exists(filepath):
+        return
+    try:
+        size = os.path.getsize(filepath)
+        if size > 0:
+            with open(filepath, "r+b") as f:
+                f.write(os.urandom(size))
+                f.flush()
+                os.fsync(f.fileno())
+                f.seek(0)
+                f.write(b'\x00' * size)
+                f.flush()
+                os.fsync(f.fileno())
+        os.remove(filepath)
+        print(f"[Anti-Forensics] Securely shredded file: {filepath}")
+    except Exception as e:
+        print(f"[Anti-Forensics] Error shredding file {filepath}: {e}")
+        try:
+            os.remove(filepath)
+        except:
+            pass

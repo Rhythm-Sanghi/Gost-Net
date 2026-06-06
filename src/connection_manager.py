@@ -44,9 +44,11 @@ class P2PConnection:
             if not self.crypto_manager:
                 self.crypto_manager = CryptoManager()
 
+            # 1. Send our ECDH public key (97 bytes)
             local_pub_key = self.crypto_manager.get_public_key_bytes()
             sock.sendall(local_pub_key)
 
+            # 2. Receive peer's ECDH public key (97 bytes)
             peer_pub_key = b''
             while len(peer_pub_key) < 97:
                 chunk = sock.recv(97 - len(peer_pub_key))
@@ -55,7 +57,71 @@ class P2PConnection:
                     return False
                 peer_pub_key += chunk
 
+            # Now we have both ECDH keys. Sign local_pub_key + peer_pub_key
+            local_signing_pub = self.crypto_manager.get_signing_public_key_bytes()
+            sig_input = local_pub_key + peer_pub_key
+            signature = self.crypto_manager.sign_data(sig_input)
+            
+            # Send our signing public key (32 bytes) and signature (64 bytes)
+            sock.sendall(local_signing_pub + signature)
+            
+            # Receive peer's signing public key (32 bytes) and signature (64 bytes)
+            peer_auth_data = b''
+            expected_auth_len = 96
+            while len(peer_auth_data) < expected_auth_len:
+                chunk = sock.recv(expected_auth_len - len(peer_auth_data))
+                if not chunk:
+                    print(f"[P2PConnection] Peer {self.peer_id} disconnected during auth exchange")
+                    return False
+                peer_auth_data += chunk
+                
+            peer_signing_key = peer_auth_data[:32]
+            peer_signature = peer_auth_data[32:]
+            
+            # Verify peer signature against peer_pub_key + local_pub_key
+            verify_input = peer_pub_key + local_pub_key
+            verified = self.crypto_manager.verify_signature(peer_signature, verify_input, peer_signing_key)
+            if not verified:
+                print(f"[P2PConnection] CRITICAL: Handshake signature verification failed for {self.peer_id}!")
+                return False
+
             self.crypto_manager.set_peer_public_key(self.peer_id, peer_pub_key)
+
+            # TOFU check against the database
+            import base64
+            peer_signing_key_b64 = base64.b64encode(peer_signing_key).decode('utf-8')
+            
+            app = None
+            try:
+                from kivymd.app import MDApp
+                app = MDApp.get_running_app()
+            except:
+                pass
+                
+            persistence_db = None
+            if app and hasattr(app, 'persistence_db'):
+                persistence_db = app.persistence_db
+            
+            if persistence_db:
+                stored_peer = persistence_db.get_peer(self.peer_id)
+                if stored_peer:
+                    stored_key = stored_peer.get('signing_key')
+                    if stored_key:
+                        if stored_key != peer_signing_key_b64:
+                            print(f"[P2PConnection] CRITICAL: Peer identity key mismatch for {self.peer_id}! Potential MitM attack detected!")
+                            return False
+                    else:
+                        # Database has peer but no key yet (migrated or pre-existing peer entry). Save it!
+                        persistence_db.update_peer_signing_key(self.peer_id, peer_signing_key_b64, 0)
+                else:
+                    # Save peer to database first, then update key
+                    persistence_db.save_peer(
+                        peer_id=self.peer_id,
+                        device_name=self.peer_info.get('username', 'Unknown'),
+                        mac_address=self.peer_info.get('mac_address'),
+                        discovery_type=self.discovery_type
+                    )
+                    persistence_db.update_peer_signing_key(self.peer_id, peer_signing_key_b64, 0)
 
             shared_secret = self.crypto_manager.derive_shared_secret(self.peer_id)
             if not shared_secret:
@@ -68,7 +134,7 @@ class P2PConnection:
                 return False
 
             self.session_key = aes_key
-            print(f"[P2PConnection] Secure handshake completed for {self.peer_id}")
+            print(f"[P2PConnection] Authenticated secure handshake completed for {self.peer_id}")
             return True
 
         except Exception as e:
@@ -289,6 +355,34 @@ class ConnectionManager:
                     sender_addr = incoming_socket.getpeername()
                     sender_id = sender_addr[0]
 
+                    is_stego = False
+                    stego_type = None
+                    if data.startswith(b'\x89PNG\r\n\x1a\n'):
+                        stego_type = "png"
+                    elif data.startswith(b'RIFF') and b'WAVE' in data[8:12]:
+                        stego_type = "wav"
+                        
+                    if stego_type:
+                        try:
+                            import os
+                            import sys
+                            sys.path.insert(0, os.path.dirname(__file__))
+                            import steganography
+                            if stego_type == "png":
+                                decoded = steganography.decode_lsb(data)
+                            else:
+                                decoded = steganography.decode_wav_lsb(data)
+                            if decoded:
+                                downloads_dir = getattr(self.engine, 'downloads_dir', 'downloads')
+                                os.makedirs(downloads_dir, exist_ok=True)
+                                carrier_path = os.path.join(downloads_dir, f"stego_bt_{int(time.time())}.{stego_type}")
+                                with open(carrier_path, 'wb') as f:
+                                    f.write(data)
+                                data = decoded
+                                is_stego = True
+                        except Exception as e:
+                            print(f"[BluetoothServer] Stego decoding error: {e}")
+
                     decrypted_data = data
                     if self.engine.crypto_manager and len(data) > 12:
                         decryption_result = self.engine.crypto_manager.decrypt_message(
@@ -306,6 +400,9 @@ class ConnectionManager:
                         message = decrypted_data.decode('utf-8', errors='ignore') if isinstance(decrypted_data, bytes) else decrypted_data
                     except:
                         message = str(decrypted_data)
+
+                    if is_stego:
+                        message = "🔓 [Stego Image Decoded] " + message
 
                     import time as time_module
                     timestamp = time_module.strftime("%H:%M:%S")
@@ -337,6 +434,8 @@ class ConnectionManager:
                 on_connected=on_connected,
                 on_failed=on_failed
             )
+            if self.engine:
+                connection.crypto_manager = self.engine.crypto_manager
         
         elif discovery_type == 'bluetooth':
             connection = BluetoothConnection(
@@ -346,6 +445,8 @@ class ConnectionManager:
                 on_connected=on_connected,
                 on_failed=on_failed
             )
+            if self.engine:
+                connection.crypto_manager = self.engine.crypto_manager
         
         else:
             print(f"[ConnectionManager] Unknown peer type: {discovery_type}")

@@ -268,10 +268,11 @@ class AudioManager:
         
         if recording_path and os.path.exists(recording_path):
             try:
-                os.remove(recording_path)
-                print(f"[AudioManager] Recording cancelled and deleted: {recording_path}")
+                from security import shred_file
+                shred_file(recording_path)
+                print(f"[AudioManager] Recording cancelled and shredded: {recording_path}")
             except Exception as e:
-                print(f"[AudioManager] Error deleting cancelled recording: {e}")
+                print(f"[AudioManager] Error shredding cancelled recording: {e}")
         
         self.current_recording_path = None
     
@@ -282,16 +283,13 @@ class AudioManager:
     
     def shred_cache(self):
         try:
+            from security import shred_file
             if os.path.exists(self.recording_dir):
                 for filename in os.listdir(self.recording_dir):
                     if filename.endswith('.m4a'):
                         file_path = os.path.join(self.recording_dir, filename)
                         try:
-                            with open(file_path, 'r+b') as f:
-                                size = os.path.getsize(file_path)
-                                f.seek(0)
-                                f.write(os.urandom(size))
-                            os.remove(file_path)
+                            shred_file(file_path)
                             print(f"[AudioManager] Shredded audio file: {file_path}")
                         except Exception as e:
                             print(f"[AudioManager] Error shredding {file_path}: {e}")

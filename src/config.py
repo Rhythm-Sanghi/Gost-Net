@@ -30,7 +30,11 @@ class ConfigManager:
         "auto_cleanup": True,
         "notification_sound": True,
         "save_files": True,
-        "max_file_size_mb": 100
+        "max_file_size_mb": 100,
+        "steganography_enabled": False,
+        "carrier_image_path": "",
+        "stego_carrier_type": "png",
+        "carrier_audio_path": ""
     }
     
     def __init__(self, config_path: str = "settings.json"):
@@ -214,8 +218,9 @@ class ConfigManager:
         """Delete the configuration file."""
         try:
             if os.path.exists(self.config_path):
-                os.remove(self.config_path)
-                print(f"[ConfigManager] Deleted config file: {self.config_path}")
+                from security import shred_file
+                shred_file(self.config_path)
+                print(f"[ConfigManager] Shredded config file: {self.config_path}")
         except Exception as e:
             print(f"[ConfigManager] Error deleting config: {e}")
     

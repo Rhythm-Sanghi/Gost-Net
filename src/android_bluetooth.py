@@ -140,6 +140,51 @@ class BluetoothBroadcastReceiver(PythonJavaClass):
             logger.error(f"[Bluetooth] BroadcastReceiver error: {e}", exc_info=True)
 
 
+if PYJNIUS_AVAILABLE:
+    class BLEAdvertiseCallback(PythonJavaClass):
+        __javainterfaces__ = ['android/bluetooth/le/AdvertiseCallback']
+        __javacontext__ = 'app'
+
+        def __init__(self):
+            super().__init__()
+
+        @java_method('(Landroid/bluetooth/le/AdvertiseSettings;)V')
+        def onStartSuccess(self, settingsInEffect):
+            logger.info("[BLE] Advertise started successfully")
+
+        @java_method('(I)V')
+        def onStartFailure(self, errorCode):
+            logger.error(f"[BLE] Advertise failed: {errorCode}")
+
+    class BLEScanCallback(PythonJavaClass):
+        __javainterfaces__ = ['android/bluetooth/le/ScanCallback']
+        __javacontext__ = 'app'
+
+        def __init__(self, callback):
+            super().__init__()
+            self.callback = callback
+
+        @java_method('(ILandroid/bluetooth/le/ScanResult;)V')
+        def onScanResult(self, callbackType, result):
+            try:
+                device = result.getDevice()
+                rssi = result.getRssi()
+                name = device.getName()
+                if not name and result.getScanRecord():
+                    name = result.getScanRecord().getDeviceName()
+                self.callback(device, rssi, name)
+            except Exception as e:
+                logger.error(f"[BLE] onScanResult error: {e}")
+
+        @java_method('(Ljava/util/List;)V')
+        def onBatchScanResults(self, results):
+            pass
+
+        @java_method('(I)V')
+        def onScanFailed(self, errorCode):
+            logger.error(f"[BLE] Scan failed: {errorCode}")
+
+
 class BluetoothRFCOMMServer(threading.Thread):
     """
     Bluetooth RFCOMM server listening for incoming connections.
@@ -675,6 +720,12 @@ class BluetoothManager:
         self.event_loop_thread = None
         self.running = False
 
+        self.ble_advertiser = None
+        self.ble_scanner = None
+        self.ble_advertise_callback = None
+        self.ble_scan_callback = None
+        self.ble_on_device_discovered = None
+
         self.lock = threading.RLock()
 
         # Initialize if pyjnius available
@@ -693,6 +744,16 @@ class BluetoothManager:
             # Get Bluetooth adapter
             BluetoothAdapter = autoclass('android.bluetooth.BluetoothAdapter')
             self.adapter = BluetoothAdapter.getDefaultAdapter()
+
+            if not self.adapter:
+                self._notify_error("Bluetooth adapter not available")
+                return
+
+            try:
+                self.ble_advertiser = self.adapter.getBluetoothLeAdvertiser()
+                self.ble_scanner = self.adapter.getBluetoothLeScanner()
+            except Exception as e:
+                logger.warning(f"[Bluetooth] BLE components not available: {e}")
 
             if not self.adapter:
                 self._notify_error("Bluetooth adapter not available")
@@ -1033,10 +1094,126 @@ class BluetoothManager:
             logger.error(f"[Bluetooth] Get paired devices error: {e}")
             return []
 
+    def start_ble_advertising(self, service_uuid: str, device_name: str) -> bool:
+        if not PYJNIUS_AVAILABLE or not self.ble_advertiser:
+            logger.warning("[BLE] Advertising not supported or advertiser unavailable")
+            return False
+            
+        try:
+            if self.ble_advertise_callback:
+                logger.debug("[BLE] Advertising already active")
+                return True
+                
+            UUID = autoclass('java.util.UUID')
+            ParcelUuid = autoclass('android.os.ParcelUuid')
+            AdvertiseSettings = autoclass('android.bluetooth.le.AdvertiseSettings')
+            AdvertiseSettingsBuilder = autoclass('android.bluetooth.le.AdvertiseSettings$Builder')
+            AdvertiseData = autoclass('android.bluetooth.le.AdvertiseData')
+            AdvertiseDataBuilder = autoclass('android.bluetooth.le.AdvertiseData$Builder')
+            
+            settings_builder = AdvertiseSettingsBuilder()
+            settings_builder.setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
+            settings_builder.setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
+            settings_builder.setConnectable(True)
+            settings = settings_builder.build()
+            
+            data_builder = AdvertiseDataBuilder()
+            java_uuid = UUID.fromString(service_uuid)
+            parcel_uuid = ParcelUuid(java_uuid)
+            data_builder.addServiceUuid(parcel_uuid)
+            data_builder.setIncludeDeviceName(True)
+            data = data_builder.build()
+            
+            self.ble_advertise_callback = BLEAdvertiseCallback()
+            self.ble_advertiser.startAdvertising(settings, data, self.ble_advertise_callback)
+            logger.info(f"[BLE] Started advertising service UUID: {service_uuid}")
+            return True
+        except Exception as e:
+            logger.error(f"[BLE] Start advertising failed: {e}")
+            self.ble_advertise_callback = None
+            return False
+
+    def stop_ble_advertising(self) -> bool:
+        if not PYJNIUS_AVAILABLE or not self.ble_advertiser or not self.ble_advertise_callback:
+            return False
+        try:
+            self.ble_advertiser.stopAdvertising(self.ble_advertise_callback)
+            self.ble_advertise_callback = None
+            logger.info("[BLE] Stopped advertising")
+            return True
+        except Exception as e:
+            logger.error(f"[BLE] Stop advertising failed: {e}")
+            return False
+
+    def start_ble_scanning(self, service_uuid: str, on_device_found: Callable) -> bool:
+        if not PYJNIUS_AVAILABLE or not self.ble_scanner:
+            logger.warning("[BLE] Scanning not supported or scanner unavailable")
+            return False
+        try:
+            if self.ble_scan_callback:
+                logger.debug("[BLE] Scan already active")
+                return True
+                
+            UUID = autoclass('java.util.UUID')
+            ParcelUuid = autoclass('android.os.ParcelUuid')
+            ScanFilterBuilder = autoclass('android.bluetooth.le.ScanFilter$Builder')
+            ScanSettingsBuilder = autoclass('android.bluetooth.le.ScanSettings$Builder')
+            ScanSettings = autoclass('android.bluetooth.le.ScanSettings')
+            ArrayList = autoclass('java.util.ArrayList')
+            
+            java_uuid = UUID.fromString(service_uuid)
+            parcel_uuid = ParcelUuid(java_uuid)
+            
+            filter_builder = ScanFilterBuilder()
+            filter_builder.setServiceUuid(parcel_uuid)
+            scan_filter = filter_builder.build()
+            
+            filters = ArrayList()
+            filters.add(scan_filter)
+            
+            settings_builder = ScanSettingsBuilder()
+            settings_builder.setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            scan_settings = settings_builder.build()
+            
+            def scan_result_callback(device, rssi, name):
+                address = device.getAddress()
+                on_device_found(address, name or f"BLE_Node_{address[-5:]}", rssi)
+                
+            self.ble_scan_callback = BLEScanCallback(scan_result_callback)
+            self.ble_scanner.startScan(filters, scan_settings, self.ble_scan_callback)
+            logger.info(f"[BLE] Started scanning for service UUID: {service_uuid}")
+            return True
+        except Exception as e:
+            logger.error(f"[BLE] Start scanning failed: {e}")
+            self.ble_scan_callback = None
+            return False
+
+    def stop_ble_scanning(self) -> bool:
+        if not PYJNIUS_AVAILABLE or not self.ble_scanner or not self.ble_scan_callback:
+            return False
+        try:
+            self.ble_scanner.stopScan(self.ble_scan_callback)
+            self.ble_scan_callback = None
+            logger.info("[BLE] Stopped scanning")
+            return True
+        except Exception as e:
+            logger.error(f"[BLE] Stop scanning failed: {e}")
+            return False
+
     def shutdown(self):
         """Clean up resources."""
         with self.lock:
             self.running = False
+
+            # Stop BLE
+            try:
+                self.stop_ble_advertising()
+            except:
+                pass
+            try:
+                self.stop_ble_scanning()
+            except:
+                pass
 
             # Disconnect all clients
             for client in self.clients.values():

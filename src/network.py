@@ -71,6 +71,13 @@ except ImportError:
     CONFIG_AVAILABLE = False
     print("[GhostEngine] Config module not available - using static username")
 
+try:
+    import steganography
+    STEGANOGRAPHY_AVAILABLE = True
+except ImportError:
+    STEGANOGRAPHY_AVAILABLE = False
+    print("[GhostEngine] Steganography module not available")
+
 
 class GhostEngine:
     """
@@ -101,7 +108,8 @@ class GhostEngine:
                  db_manager: Optional['DatabaseManager'] = None,
                  persistence_db: Optional['PersistenceDatabase'] = None,
                  config_manager: Optional['ConfigManager'] = None,
-                 connection_manager: Optional['ConnectionManager'] = None):
+                 connection_manager: Optional['ConnectionManager'] = None,
+                 signing_private_key_bytes: Optional[bytes] = None):
         """
         Initialize the Ghost Network Engine.
         
@@ -114,10 +122,11 @@ class GhostEngine:
             enable_storage: Enable persistent storage (default: True)
             db_manager: External DatabaseManager instance (optional)
             config_manager: External ConfigManager instance (optional)
+            signing_private_key_bytes: Decrypted signing private key (optional)
         """
         self.crypto_manager = None
         if SECURITY_AVAILABLE:
-            self.crypto_manager = CryptoManager()
+            self.crypto_manager = CryptoManager(signing_private_key_bytes)
         
         self.config_manager = config_manager
         if not self.config_manager and CONFIG_AVAILABLE:
@@ -222,6 +231,7 @@ class GhostEngine:
         
         # Thread locks
         self.peers_lock = threading.Lock()
+        self.last_beacon_processed = {}
         
         # Encryption
         self.cipher = self._generate_cipher()
@@ -229,6 +239,9 @@ class GhostEngine:
         # Sockets (initialized in start())
         self.udp_socket = None
         self.tcp_socket = None
+        self.tcp_port = self.TCP_PORT
+        self.mesh_offsets = {}
+        self.mesh_time_offset = 0.0
         
         # Threads
         self.beacon_thread = None
@@ -237,6 +250,8 @@ class GhostEngine:
         self.pruning_thread = None
         self.routing_maintenance_thread = None
         self.relay_forwarding_thread = None
+        self.chaffing_thread = None
+        self.chaffing_enabled = False
         
         self.pending_forwards: list = []
         self.forwards_lock = threading.Lock()
@@ -361,32 +376,21 @@ class GhostEngine:
             print("[GhostEngine] CRITICAL: Could not bind UDP socket - continuing without discovery")
             self.udp_socket = None
         
-        # Initialize TCP server socket for incoming messages with retry logic
+        # Initialize TCP server socket for incoming messages with dynamic port allocation (port 0)
         tcp_success = False
-        for port_offset in range(0, 5):  # Try ports 37021-37025
-            try:
-                tcp_port = self.TCP_PORT + port_offset
-                self.tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.tcp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                self.tcp_socket.bind(('0.0.0.0', tcp_port))
-                self.tcp_socket.listen(5)
-                self.tcp_socket.settimeout(1.0)
-                self.TCP_PORT = tcp_port  # Update to working port
-                print(f"[GhostEngine] TCP server listening on port {tcp_port}")
-                tcp_success = True
-                break
-            except OSError as e:
-                print(f"[GhostEngine] TCP port {tcp_port} failed: {e}")
-                if self.tcp_socket:
-                    try:
-                        self.tcp_socket.close()
-                    except:
-                        pass
-                continue
-            except Exception as e:
-                print(f"[GhostEngine] TCP socket error: {e}")
-                break
-        
+        try:
+            self.tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.tcp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.tcp_socket.bind(('0.0.0.0', 0))
+            self.tcp_socket.listen(5)
+            self.tcp_socket.settimeout(1.0)
+            self.tcp_port = self.tcp_socket.getsockname()[1]
+            self.TCP_PORT = self.tcp_port  # Update working port
+            print(f"[GhostEngine] TCP server listening on dynamic port {self.tcp_port}")
+            tcp_success = True
+        except Exception as e:
+            print(f"[GhostEngine] Dynamic TCP port binding failed: {e}")
+            
         if not tcp_success:
             print("[GhostEngine] CRITICAL: Could not bind TCP socket - continuing without messaging")
             self.tcp_socket = None
@@ -462,6 +466,14 @@ class GhostEngine:
                 print("[GhostEngine] Relay forwarding thread started")
             except Exception as e:
                 print(f"[GhostEngine] Failed to start relay forwarding thread: {e}")
+        
+        try:
+            self.chaffing_thread = threading.Thread(target=self._chaffing_worker, daemon=True)
+            self.chaffing_thread.start()
+            threads_started += 1
+            print("[GhostEngine] Chaffing thread started")
+        except Exception as e:
+            print(f"[GhostEngine] Failed to start chaffing thread: {e}")
         
         print(f"[GhostEngine] {threads_started} threads started successfully.")
         
@@ -575,12 +587,31 @@ class GhostEngine:
         
         for thread in [self.beacon_thread, self.listener_thread,
                       self.tcp_server_thread, self.pruning_thread,
-                      self.routing_maintenance_thread, self.relay_forwarding_thread]:
+                      self.routing_maintenance_thread, self.relay_forwarding_thread,
+                      self.chaffing_thread]:
             if thread and thread.is_alive():
                 thread.join(timeout=2.0)
         
         print("[GhostEngine] Shutdown complete.")
     
+    def _get_battery_level(self) -> int:
+        """Retrieve the battery level of the device, falling back gracefully if tools are missing."""
+        try:
+            import psutil
+            battery = psutil.sensors_battery()
+            if battery is not None:
+                return int(battery.percent)
+        except:
+            pass
+        try:
+            from plyer import battery
+            status = battery.status
+            if status and 'percentage' in status:
+                return int(status['percentage'])
+        except:
+            pass
+        return 85
+
     def _beacon_worker(self):
         """Broadcast beacon packets every BEACON_INTERVAL seconds."""
         while self.running:
@@ -604,7 +635,10 @@ class GhostEngine:
                     "username": current_username,
                     "ip": self.local_ip,
                     "peer_id": self.peer_id,
-                    "visible_peers": visible_peers
+                    "visible_peers": visible_peers,
+                    "battery": self._get_battery_level(),
+                    "tcp_port": self.tcp_port,
+                    "timestamp": time.time()
                 }
                 message = json.dumps(beacon).encode('utf-8')
                 
@@ -620,7 +654,14 @@ class GhostEngine:
                 if self.running:
                     print(f"[Beacon] Error broadcasting: {e}")
             
-            time.sleep(self.BEACON_INTERVAL)
+            # Sleep: throttle interval if battery is low (< 20%)
+            sleep_interval = self.BEACON_INTERVAL
+            try:
+                if self._get_battery_level() < 20:
+                    sleep_interval = 300  # 5 minutes
+            except:
+                pass
+            time.sleep(sleep_interval)
     
     def _udp_listener_worker(self):
         """Listen for incoming UDP beacon packets."""
@@ -638,25 +679,55 @@ class GhostEngine:
                 if sender_ip == self.local_ip:
                     continue
                 
+                # Rate limit processing: ignore beacons from the same IP if processed less than 1.0 second ago
+                current_time = time.time()
+                last_processed = self.last_beacon_processed.get(sender_ip, 0.0)
+                if current_time - last_processed < 1.0:
+                    continue
+                self.last_beacon_processed[sender_ip] = current_time
+                
                 # Parse beacon
-                beacon = json.loads(data.decode('utf-8'))
+                try:
+                    beacon = json.loads(data.decode('utf-8', errors='ignore'))
+                except Exception:
+                    continue
+                
+                if beacon.get("type") == "CHAFF":
+                    continue
                 
                 if beacon.get("type") == "BEACON":
+                    # Enforce MAX_PEERS capacity limit (500)
+                    with self.peers_lock:
+                        if len(self.peers) >= 500 and sender_ip not in self.peers:
+                            continue
+                            
                     username = beacon.get("username", "Unknown")
                     current_time = time.time()
                     beacon_peer_id = beacon.get("peer_id", sender_ip)
-                    visible_peers = beacon.get("visible_peers", [])
+                    visible_peers = beacon.get("visible_peers", [])[:10]
+                    battery_level = beacon.get("battery", 100)
+                    
+                    tcp_port = beacon.get("tcp_port")
+                    sender_timestamp = beacon.get("timestamp")
+                    
+                    if sender_timestamp is not None:
+                        offset = sender_timestamp - current_time
+                        with self.peers_lock:
+                            self.mesh_offsets[beacon_peer_id] = offset
+                        self._update_mesh_time_offset()
                     
                     with self.peers_lock:
                         self.peers[sender_ip] = {
                             "username": username,
                             "last_seen": current_time,
                             "peer_id": beacon_peer_id,
-                            "visible_peers": visible_peers
+                            "visible_peers": visible_peers,
+                            "battery": battery_level,
+                            "tcp_port": tcp_port
                         }
                     
                     if self.routing_table:
-                        self.routing_table.add_direct_route(beacon_peer_id)
+                        self.routing_table.add_direct_route(beacon_peer_id, battery_level=battery_level)
                         
                         for visible_peer_id in visible_peers:
                             if visible_peer_id != self.peer_id:
@@ -664,20 +735,62 @@ class GhostEngine:
                                     visible_peer_id,
                                     beacon_peer_id,
                                     1,
-                                    [visible_peer_id, beacon_peer_id]
+                                    [visible_peer_id, beacon_peer_id],
+                                    next_hop_battery=battery_level
                                 )
+                elif beacon.get("type") == "WIKI_QUERY":
+                    query = beacon.get("query", "").strip().lower()
+                    sender_name = beacon.get("sender_name", "Unknown")
+                    if query:
+                        guides_path = os.path.join(os.path.dirname(__file__), "survival_guides.json")
+                        response = None
+                        if os.path.exists(guides_path):
+                            try:
+                                with open(guides_path, 'r', encoding='utf-8') as f:
+                                    guides = json.load(f)
+                                for k, v in guides.items():
+                                    if query in k or k in query:
+                                        response = v
+                                        break
+                            except Exception as e:
+                                print(f"[Wiki Proxy] Error reading database: {e}")
+                                
+                        if response:
+                            reply = {
+                                "type": "WIKI_RESPONSE",
+                                "query": query,
+                                "response": response,
+                                "responder_name": self.username
+                            }
+                            reply_msg = json.dumps(reply).encode('utf-8')
+                            try:
+                                self.udp_socket.sendto(reply_msg, (sender_ip, self.UDP_PORT))
+                                print(f"[Wiki Proxy] Replied to {sender_ip} for query '{query}'")
+                            except Exception as e:
+                                print(f"[Wiki Proxy] Error replying: {e}")
+                                
+                elif beacon.get("type") == "WIKI_RESPONSE":
+                    query = beacon.get("query")
+                    response = beacon.get("response")
+                    responder = beacon.get("responder_name", "WikiProxy")
+                    current_time = time.time()
+                    timestamp = datetime.now().strftime("%H:%M:%S")
+                    
+                    if self.on_message_received:
+                        msg = f"📖 [Wiki Result from {responder} for '{query}']: {response}"
+                        self.on_message_received(sender_ip, msg, timestamp)
                     
                     if self.persistence_db:
                         threading.Thread(
                             target=self.persistence_db.save_peer,
-                            args=(sender_ip, username, None, "udp", current_time),
+                            args=(sender_ip, responder, None, "udp", current_time),
                             daemon=True
                         ).start()
                     
                     if self.db_manager:
                         threading.Thread(
                             target=self.db_manager.save_peer,
-                            args=(sender_ip, username, current_time),
+                            args=(sender_ip, responder, current_time),
                             daemon=True
                         ).start()
                     
@@ -712,8 +825,13 @@ class GhostEngine:
                     
                     for ip in stale_ips:
                         username = self.peers[ip]["username"]
+                        peer_id = self.peers[ip].get("peer_id")
+                        if peer_id and peer_id in self.mesh_offsets:
+                            del self.mesh_offsets[peer_id]
                         del self.peers[ip]
                         print(f"[Pruning] Removed stale peer: {username} @ {ip}")
+                    if stale_ips:
+                        self._update_mesh_time_offset()
                 
                 # Notify UI if peers were removed
                 if stale_ips and self.on_peer_update:
@@ -722,6 +840,40 @@ class GhostEngine:
             except Exception as e:
                 print(f"[Pruning] Error: {e}")
     
+    def _get_peer_port(self, key: str) -> int:
+        """Resolve the TCP port for a peer IP or peer ID, falling back to legacy port."""
+        if not key:
+            return self.TCP_PORT
+        clean_key = str(key)
+        with self.peers_lock:
+            if clean_key in self.peers:
+                port = self.peers[clean_key].get("tcp_port")
+                if port is not None:
+                    return port
+            for ip, info in self.peers.items():
+                if info.get("peer_id") == clean_key:
+                    port = info.get("tcp_port")
+                    if port is not None:
+                        return port
+        return self.TCP_PORT
+
+    def _update_mesh_time_offset(self):
+        """Update the mesh time offset to the median of active peer offsets."""
+        offsets_list = list(self.mesh_offsets.values())
+        if not offsets_list:
+            self.mesh_time_offset = 0.0
+            return
+        sorted_offsets = sorted(offsets_list)
+        n = len(sorted_offsets)
+        if n % 2 == 1:
+            self.mesh_time_offset = sorted_offsets[n // 2]
+        else:
+            self.mesh_time_offset = (sorted_offsets[n // 2 - 1] + sorted_offsets[n // 2]) / 2.0
+
+    def get_mesh_time(self) -> float:
+        """Return current local time adjusted by the mesh clock offset."""
+        return time.time() + self.mesh_time_offset
+
     def _tcp_server_worker(self):
         """Accept incoming TCP connections and handle messages."""
         while self.running:
@@ -748,44 +900,105 @@ class GhostEngine:
     def _handle_tcp_connection(self, conn: socket.socket, addr: tuple):
         """Handle an individual TCP connection (text or file)."""
         sender_ip = addr[0]
+        conn.settimeout(10.0)
         
         try:
             header_data = b""
-            while True:
+            is_stego = False
+            max_bytes = 5 * 1024 * 1024 # 5 MB maximum header/LSB buffer to prevent OOM
+            while len(header_data) < max_bytes:
                 chunk = conn.recv(1024)
                 if not chunk:
                     break
                 header_data += chunk
                 
-                if self.HEADER_DELIMITER in header_data:
-                    header_part, remaining_data = header_data.split(self.HEADER_DELIMITER, 1)
+                if len(header_data) >= 12 and (
+                    header_data.startswith(b'\x89PNG\r\n\x1a\n') or
+                    (header_data.startswith(b'RIFF') and b'WAVE' in header_data[8:12])
+                ):
+                    is_stego = True
                     
+                if not is_stego and self.HEADER_DELIMITER in header_data:
+                    break
+            
+            if len(header_data) >= max_bytes:
+                print(f"[TCP Handler] Connection from {sender_ip} exceeded maximum header size limit. Dropping.")
+                return
+            
+            if is_stego and STEGANOGRAPHY_AVAILABLE:
+                file_ext = "png"
+                if header_data.startswith(b'\x89PNG\r\n\x1a\n'):
+                    stego_data = steganography.decode_lsb(header_data)
+                else:
+                    stego_data = steganography.decode_wav_lsb(header_data)
+                    file_ext = "wav"
+                    
+                if stego_data:
+                    downloads_dir = getattr(self, 'downloads_dir', 'downloads')
+                    os.makedirs(downloads_dir, exist_ok=True)
+                    carrier_path = os.path.join(downloads_dir, f"stego_{int(time.time())}.{file_ext}")
+                    try:
+                        with open(carrier_path, 'wb') as f:
+                            f.write(header_data)
+                    except:
+                        pass
+                    header_data = stego_data
+            
+            if self.HEADER_DELIMITER in header_data:
+                header_part, remaining_data = header_data.split(self.HEADER_DELIMITER, 1)
+                
+                header_json = None
+                sender_peer_id = None
+                with self.peers_lock:
+                    peer_info = self.peers.get(sender_ip)
+                    if peer_info:
+                        sender_peer_id = peer_info.get('peer_id')
+                
+                if sender_peer_id and self.crypto_manager:
+                    sender_aes_key = self.crypto_manager.get_peer_aes_key(sender_peer_id)
+                    if sender_aes_key:
+                        try:
+                            import base64
+                            from cryptography.fernet import Fernet
+                            fernet_key = base64.urlsafe_b64encode(sender_aes_key)
+                            peer_cipher = Fernet(fernet_key)
+                            header_json = peer_cipher.decrypt(header_part).decode('utf-8')
+                            print(f"[Onion] Decrypted header using derived AES key from sender: {sender_peer_id}")
+                        except Exception:
+                            pass
+                
+                if header_json is None:
                     try:
                         header_json = self._decrypt_message(header_part)
-                        header = json.loads(header_json)
-                    except (ValueError, json.JSONDecodeError) as e:
-                        print(f"[TCP Handler] Invalid header from {sender_ip}: {e}")
+                    except Exception as e:
+                        print(f"[TCP Handler] Decryption fallback failed: {e}")
                         return
-                    
-                    target_peer_id = header.get("target_peer_id")
-                    network_ttl = header.get("network_ttl", 10)
-                    
-                    if target_peer_id and target_peer_id != self.peer_id and network_ttl > 0 and self.routing_table:
-                        route = self.routing_table.get_route(target_peer_id)
-                        if route:
-                            self._queue_packet_forward(sender_ip, target_peer_id, header, remaining_data, network_ttl)
-                            return
-                    
-                    if header.get("type") == "TEXT":
-                        self._handle_text_message(sender_ip, header, remaining_data, conn)
-                    elif header.get("type") == "FILE":
-                        self._handle_file_transfer(sender_ip, header, remaining_data, conn)
-                    elif header.get("message_type") == "SOS":
-                        self._handle_sos_message(sender_ip, header, remaining_data)
-                    else:
-                        print(f"[TCP Handler] Unknown type: {header.get('type')}")
-                    
-                    break
+                
+                try:
+                    header = json.loads(header_json)
+                    if is_stego:
+                        header["stego"] = True
+                except (ValueError, json.JSONDecodeError) as e:
+                    print(f"[TCP Handler] Invalid header from {sender_ip}: {e}")
+                    return
+                
+                target_peer_id = header.get("target_peer_id")
+                network_ttl = header.get("network_ttl", 10)
+                
+                if target_peer_id and target_peer_id != self.peer_id and network_ttl > 0 and self.routing_table:
+                    route = self.routing_table.get_route(target_peer_id)
+                    if route:
+                        self._queue_packet_forward(sender_ip, target_peer_id, header, remaining_data, network_ttl)
+                        return
+                
+                if header.get("type") == "TEXT":
+                    self._handle_text_message(sender_ip, header, remaining_data, conn)
+                elif header.get("type") == "FILE":
+                    self._handle_file_transfer(sender_ip, header, remaining_data, conn)
+                elif header.get("message_type") == "SOS":
+                    self._handle_sos_message(sender_ip, header, remaining_data)
+                else:
+                    print(f"[TCP Handler] Unknown type: {header.get('type')}")
         
         except Exception as e:
             print(f"[TCP Handler] Error handling connection from {sender_ip}: {e}")
@@ -809,6 +1022,8 @@ class GhostEngine:
         """Handle incoming text message."""
         try:
             message_text = header.get("content", "")
+            if header.get("stego"):
+                message_text = "🔓 [Stego Image Decoded] " + message_text
             timestamp = datetime.now().strftime("%H:%M:%S")
             timestamp_unix = time.time()
             ttl = header.get("ttl")
@@ -851,19 +1066,32 @@ class GhostEngine:
                 print(f"[File Transfer] File too large: {filesize} bytes (max {self.MAX_FILE_SIZE})")
                 return
             
-            safe_filename = self._sanitize_filename(filename)
-            filepath = os.path.join(self.downloads_dir, safe_filename)
+            target_peer_id = header.get("target_peer_id")
+            my_hash = hashlib.sha256(self.peer_id.encode()).hexdigest()
+            is_target = (target_peer_id == self.peer_id or target_peer_id == my_hash)
+            is_carrier = (target_peer_id and not is_target)
             
-            base, ext = os.path.splitext(filepath)
-            counter = 1
-            while os.path.exists(filepath):
-                filepath = f"{base}_{counter}{ext}"
-                counter += 1
+            if is_carrier:
+                hash_target = target_peer_id
+                if len(target_peer_id) != 64 or not all(c in '0123456789abcdefABCDEF' for c in target_peer_id):
+                    hash_target = hashlib.sha256(target_peer_id.encode()).hexdigest()
+                spool_item_dir = os.path.join(self.spool_dir, hash_target, file_id)
+                os.makedirs(spool_item_dir, exist_ok=True)
+                filepath = os.path.join(spool_item_dir, "file.dat")
+            else:
+                safe_filename = self._sanitize_filename(filename)
+                filepath = os.path.join(self.downloads_dir, safe_filename)
+                
+                base, ext = os.path.splitext(filepath)
+                counter = 1
+                while os.path.exists(filepath):
+                    filepath = f"{base}_{counter}{ext}"
+                    counter += 1
             
             bytes_received = len(initial_data)
             
             if is_chunked:
-                self._handle_chunked_file_transfer(filepath, filesize, bytes_received, initial_data, conn, sender_ip, filename, checksum, ttl)
+                self._handle_chunked_file_transfer(filepath, filesize, bytes_received, initial_data, conn, sender_ip, filename, checksum, ttl, is_carrier, header)
             else:
                 with open(filepath, 'wb') as f:
                     f.write(initial_data)
@@ -880,7 +1108,24 @@ class GhostEngine:
                 received_checksum = self._calculate_checksum(filepath)
                 if checksum and received_checksum != checksum:
                     print(f"[File Transfer] Checksum mismatch! Expected {checksum}, got {received_checksum}")
-                    os.remove(filepath)
+                    from security import shred_file
+                    shred_file(filepath)
+                    return
+                
+                if is_carrier:
+                    metadata = {
+                        "target": target_peer_id,
+                        "original_filename": filename,
+                        "filesize": filesize,
+                        "file_id": file_id,
+                        "checksum": checksum,
+                        "chunked": is_chunked,
+                        "ttl": ttl,
+                        "timestamp": datetime.now().isoformat(),
+                        "replicated_to": [header.get("sender_peer_id", "")]
+                    }
+                    self._write_spool_metadata(os.path.join(os.path.dirname(filepath), "metadata.json"), metadata)
+                    print(f"[Epidemic DTN] Spooled carrier file '{filename}' (file_id: {file_id}) for target {target_peer_id}")
                     return
                 
                 timestamp = datetime.now().strftime("%H:%M:%S")
@@ -935,7 +1180,7 @@ class GhostEngine:
         
         return sanitized
     
-    def _handle_chunked_file_transfer(self, filepath: str, filesize: int, initial_bytes: int, initial_data: bytes, conn: socket.socket, sender_ip: str, filename: str, checksum: str, ttl: Optional[int] = None):
+    def _handle_chunked_file_transfer(self, filepath: str, filesize: int, initial_bytes: int, initial_data: bytes, conn: socket.socket, sender_ip: str, filename: str, checksum: str, ttl: Optional[int] = None, is_carrier: bool = False, header: dict = None):
         """Handle chunked encrypted file transfer with on-the-fly decryption."""
         try:
             with open(filepath, 'wb') as f:
@@ -974,7 +1219,26 @@ class GhostEngine:
             received_checksum = self._calculate_checksum(filepath)
             if checksum and received_checksum != checksum:
                 print(f"[File Transfer] Checksum mismatch! Expected {checksum}, got {received_checksum}")
-                os.remove(filepath)
+                from security import shred_file
+                shred_file(filepath)
+                return
+            
+            if is_carrier and header:
+                target_peer_id = header.get("target_peer_id")
+                file_id = header.get("file_id", "unknown")
+                metadata = {
+                    "target": target_peer_id,
+                    "original_filename": filename,
+                    "filesize": filesize,
+                    "file_id": file_id,
+                    "checksum": checksum,
+                    "chunked": True,
+                    "ttl": ttl,
+                    "timestamp": datetime.now().isoformat(),
+                    "replicated_to": [header.get("sender_peer_id", "")]
+                }
+                self._write_spool_metadata(os.path.join(os.path.dirname(filepath), "metadata.json"), metadata)
+                print(f"[Epidemic DTN] Spooled chunked carrier file '{filename}' (file_id: {file_id}) for target {target_peer_id}")
                 return
             
             timestamp = datetime.now().strftime("%H:%M:%S")
@@ -1014,6 +1278,28 @@ class GhostEngine:
             sos_json = self._decrypt_message(encrypted_data)
             sos_payload = json.loads(sos_json)
             
+            # Verify Ed25519 signature
+            import base64
+            signature_b64 = sos_payload.get('signature', '')
+            signing_pubkey_b64 = sos_payload.get('signing_pubkey', '')
+            
+            verify_payload = {k: v for k, v in sos_payload.items() if k not in ('signature', 'signing_pubkey')}
+            sig_data = json.dumps(verify_payload, sort_keys=True).encode('utf-8')
+            
+            verified = False
+            if signature_b64 and signing_pubkey_b64 and self.crypto_manager:
+                try:
+                    sig_bytes = base64.b64decode(signature_b64)
+                    pubkey_bytes = base64.b64decode(signing_pubkey_b64)
+                    verified = self.crypto_manager.verify_signature(sig_bytes, sig_data, pubkey_bytes)
+                except Exception as e:
+                    print(f"[GhostEngine] SOS signature verification error: {e}")
+            
+            if not verified:
+                sender_name = sos_payload.get('sender_name', 'Unknown')
+                if not sender_name.startswith("⚠️ [UNVERIFIED]"):
+                    sos_payload['sender_name'] = f"⚠️ [UNVERIFIED] {sender_name}"
+            
             sos_id = sos_payload.get('sos_id')
             from_peer = sos_payload.get('sender_id')
             
@@ -1031,7 +1317,11 @@ class GhostEngine:
                 })
                 self.sos_cache = [c for c in self.sos_cache if time.time() - c['timestamp'] < self.sos_cache_max_age]
             
-            print(f"[GhostEngine] SOS received from {sos_payload.get('sender_name')}")
+            try:
+                print(f"[GhostEngine] SOS received from {sos_payload.get('sender_name')}")
+            except UnicodeEncodeError:
+                safe_name = str(sos_payload.get('sender_name', 'Unknown')).encode('ascii', errors='replace').decode('ascii')
+                print(f"[GhostEngine] SOS received from {safe_name}")
             
             if self.on_sos_received:
                 self.on_sos_received(
@@ -1050,7 +1340,7 @@ class GhostEngine:
                     try:
                         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                         sock.settimeout(3)
-                        sock.connect((peer_ip, self.TCP_PORT))
+                        sock.connect((peer_ip, self._get_peer_port(peer_ip)))
                         
                         header = {
                             'type': 'message',
@@ -1061,7 +1351,7 @@ class GhostEngine:
                         header_json = json.dumps(header)
                         header_bytes = header_json.encode('utf-8')
                         
-                        encrypted_sos = self._encrypt_message(sos_json)
+                        encrypted_sos = self._encrypt_message(json.dumps(sos_payload))
                         full_message = header_bytes + self.HEADER_DELIMITER + encrypted_sos
                         sock.sendall(full_message)
                         sock.close()
@@ -1077,18 +1367,55 @@ class GhostEngine:
     
     def send_message(self, target_ip: str, message_text: str, peer_id: str = None, ttl: Optional[int] = None) -> bool:
         """
-        Send an encrypted text message to a target peer via TCP or P2P connection.
-        
-        Args:
-            target_ip: IP address of the target peer (or peer_id for off-grid peers)
-            message_text: The message to send
-            peer_id: Peer ID for off-grid peers (WiFi Direct/Bluetooth)
             ttl: Time-to-live in seconds for message expiration (optional)
             
         Returns:
             True if sent successfully, False otherwise
         """
         try:
+            if message_text.startswith('/wiki '):
+                query = message_text[6:].strip()
+                if self.udp_socket:
+                    beacon = {
+                        "type": "WIKI_QUERY",
+                        "query": query,
+                        "sender_name": self.username,
+                        "peer_id": self.peer_id
+                    }
+                    msg = json.dumps(beacon).encode('utf-8')
+                    try:
+                        self.udp_socket.sendto(msg, ('<broadcast>', self.UDP_PORT))
+                        print(f"[Wiki Search] Broadcasted query for '{query}'")
+                        return True
+                    except Exception as e:
+                        print(f"[Wiki Search] Broadcast failed: {e}")
+                return False
+
+            stego_enabled = False
+            carrier = None
+            stego_type = "png"
+            if self.config_manager:
+                stego_enabled = self.config_manager.get("steganography_enabled", False)
+                stego_type = self.config_manager.get("stego_carrier_type", "png")
+                
+            if stego_enabled and STEGANOGRAPHY_AVAILABLE:
+                if stego_type == "wav":
+                    carrier_path = self.config_manager.get("carrier_audio_path", "")
+                    if carrier_path and os.path.exists(carrier_path):
+                        try:
+                            with open(carrier_path, 'rb') as f:
+                                carrier = f.read()
+                        except:
+                            carrier = steganography.get_or_create_default_wav_carrier()
+                    else:
+                        carrier = steganography.get_or_create_default_wav_carrier()
+                else:
+                    carrier_path = self.config_manager.get("carrier_image_path", "")
+                    if carrier_path and os.path.exists(carrier_path):
+                        carrier = carrier_path
+                    else:
+                        carrier = steganography.get_or_create_default_carrier()
+            
             if target_ip and (target_ip.startswith('wfd_') or target_ip.startswith('bt_')):
                 peer_id = target_ip
                 
@@ -1101,6 +1428,15 @@ class GhostEngine:
                     if encryption_result:
                         nonce, ciphertext = encryption_result
                         encrypted_payload = nonce + ciphertext
+                        
+                        if stego_enabled and STEGANOGRAPHY_AVAILABLE:
+                            try:
+                                if stego_type == "wav":
+                                    encrypted_payload = steganography.encode_wav_lsb(carrier, encrypted_payload)
+                                else:
+                                    encrypted_payload = steganography.encode_lsb(carrier, encrypted_payload)
+                            except Exception as e:
+                                print(f"[GhostEngine] Stego encoding failed: {e}")
                 
                 if encrypted_payload:
                     success = self.connection_manager.send_message_to_peer(peer_id, encrypted_payload)
@@ -1140,10 +1476,20 @@ class GhostEngine:
             
             client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             client_socket.settimeout(10.0)
-            client_socket.connect((target_ip, self.TCP_PORT))
+            client_socket.connect((target_ip, self._get_peer_port(target_ip)))
             
-            client_socket.sendall(encrypted_header + self.HEADER_DELIMITER)
-            
+            payload = encrypted_header + self.HEADER_DELIMITER
+            if stego_enabled and STEGANOGRAPHY_AVAILABLE:
+                try:
+                    if stego_type == "wav":
+                        payload = steganography.encode_wav_lsb(carrier, encrypted_header + self.HEADER_DELIMITER)
+                    else:
+                        payload = steganography.encode_lsb(carrier, encrypted_header + self.HEADER_DELIMITER)
+                except Exception as e:
+                    print(f"[GhostEngine] Stego encoding failed: {e}")
+                    payload = encrypted_header + self.HEADER_DELIMITER
+                    
+            client_socket.sendall(payload)
             client_socket.close()
             print(f"[Send] Message sent to {target_ip}")
             
@@ -1201,7 +1547,7 @@ class GhostEngine:
                     try:
                         test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                         test_sock.settimeout(2.0)
-                        test_sock.connect((target_ip, self.TCP_PORT))
+                        test_sock.connect((target_ip, self._get_peer_port(target_ip)))
                         test_sock.close()
                         is_reachable = True
                     except:
@@ -1237,6 +1583,7 @@ class GhostEngine:
                             "chunked": use_chunking,
                             "timestamp": datetime.now().isoformat(),
                             "target_peer_id": target_ip,
+                            "sender_peer_id": self.peer_id,
                             "network_ttl": 10
                         }
                         if ttl is not None and ttl > 0:
@@ -1322,6 +1669,7 @@ class GhostEngine:
                     "chunked": use_chunking,
                     "timestamp": datetime.now().isoformat(),
                     "target_peer_id": target_ip,
+                    "sender_peer_id": self.peer_id,
                     "network_ttl": 10
                 }
                 
@@ -1333,7 +1681,7 @@ class GhostEngine:
                 
                 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 client_socket.settimeout(30.0)
-                client_socket.connect((target_ip, self.TCP_PORT))
+                client_socket.connect((target_ip, self._get_peer_port(target_ip)))
                 
                 client_socket.sendall(encrypted_header + self.HEADER_DELIMITER)
                 
@@ -1418,7 +1766,10 @@ class GhostEngine:
         checksum = self._calculate_checksum(file_path)
         file_id = hashlib.sha256(f"{filename}{time.time()}".encode()).hexdigest()[:16]
         
-        dest_dir = os.path.join(self.spool_dir, str(target), file_id)
+        hash_target = str(target)
+        if len(hash_target) != 64 or not all(c in '0123456789abcdefABCDEF' for c in hash_target):
+            hash_target = hashlib.sha256(str(target).encode()).hexdigest()
+        dest_dir = os.path.join(self.spool_dir, hash_target, file_id)
         os.makedirs(dest_dir, exist_ok=True)
         
         spooled_file_path = os.path.join(dest_dir, "file.dat")
@@ -1436,17 +1787,58 @@ class GhostEngine:
             "checksum": checksum,
             "chunked": use_chunking,
             "ttl": ttl,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            "replicated_to": []
         }
         
         try:
-            with open(os.path.join(dest_dir, "metadata.json"), 'w') as f:
-                json.dump(metadata, f)
+            self._write_spool_metadata(os.path.join(dest_dir, "metadata.json"), metadata)
             print(f"[DTN Spool] Spooled file {filename} for peer {target} (file_id: {file_id})")
             return True
         except Exception as e:
             print(f"[DTN Spool] Error saving metadata: {e}")
             return False
+
+    def _write_spool_metadata(self, filepath: str, metadata: dict):
+        try:
+            import json
+            import base64
+            data_str = json.dumps(metadata)
+            if self.db_manager and self.db_manager.cipher:
+                encrypted_bytes = self.db_manager.cipher.encrypt(data_str.encode('utf-8'))
+            else:
+                encrypted_bytes = base64.b64encode(data_str.encode('utf-8'))
+            with open(filepath, 'wb') as f:
+                f.write(encrypted_bytes)
+        except Exception as e:
+            print(f"[DTN Spool] Error writing metadata to {filepath}: {e}")
+
+    def _read_spool_metadata(self, filepath: str) -> Optional[dict]:
+        try:
+            import json
+            import base64
+            with open(filepath, 'rb') as f:
+                encrypted_bytes = f.read()
+            if self.db_manager and self.db_manager.cipher:
+                try:
+                    decrypted = self.db_manager.cipher.decrypt(encrypted_bytes).decode('utf-8')
+                    return json.loads(decrypted)
+                except:
+                    pass
+            # Fallback to base64 or plaintext
+            try:
+                decrypted = base64.b64decode(encrypted_bytes).decode('utf-8')
+                return json.loads(decrypted)
+            except:
+                pass
+            try:
+                with open(filepath, 'r') as f:
+                    return json.load(f)
+            except:
+                pass
+        except Exception as e:
+            print(f"[DTN Spool] Error reading metadata from {filepath}: {e}")
+        return None
 
     def _process_dtn_spool(self):
         if not hasattr(self, 'spool_dir') or not os.path.exists(self.spool_dir):
@@ -1457,26 +1849,47 @@ class GhostEngine:
             if not os.path.isdir(target_path):
                 continue
                 
-            is_reachable = False
-            if self.connection_manager:
-                connection = self.connection_manager.get_connection(target_dir)
-                if target_dir.startswith('wfd_') and connection and connection.connected_ip:
-                    is_reachable = True
-                elif target_dir.startswith('bt_') and connection and connection.state.value == 'connected' and connection.rfcomm_socket:
-                    is_reachable = True
+            resolved_peer_id = None
+            resolved_ip = None
             
-            # For standard IPs, check if we can connect
-            if not is_reachable and not (target_dir.startswith('wfd_') or target_dir.startswith('bt_')):
-                try:
-                    test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    test_sock.settimeout(2.0)
-                    test_sock.connect((target_dir, self.TCP_PORT))
-                    test_sock.close()
-                    is_reachable = True
-                except:
-                    is_reachable = False
-                    
-            if is_reachable:
+            my_hash = hashlib.sha256(self.peer_id.encode()).hexdigest()
+            if target_dir == my_hash:
+                resolved_peer_id = self.peer_id
+            else:
+                with self.peers_lock:
+                    for ip, info in self.peers.items():
+                        p_id = info.get("peer_id", ip)
+                        if hashlib.sha256(p_id.encode()).hexdigest() == target_dir:
+                            resolved_peer_id = p_id
+                            resolved_ip = ip
+                            break
+                            
+            is_reachable = False
+            connection_target = None
+            
+            if resolved_peer_id:
+                connection_target = resolved_peer_id
+                if self.connection_manager:
+                    connection = self.connection_manager.get_connection(resolved_peer_id)
+                    if resolved_peer_id.startswith('wfd_') and connection and connection.connected_ip:
+                        is_reachable = True
+                        resolved_ip = connection.connected_ip
+                    elif resolved_peer_id.startswith('bt_') and connection and connection.state.value == 'connected' and connection.rfcomm_socket:
+                        is_reachable = True
+                
+                if not is_reachable and not (resolved_peer_id.startswith('wfd_') or resolved_peer_id.startswith('bt_')):
+                    ip_to_test = resolved_ip if resolved_ip else resolved_peer_id
+                    try:
+                        test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        test_sock.settimeout(2.0)
+                        test_sock.connect((ip_to_test, self._get_peer_port(ip_to_test)))
+                        test_sock.close()
+                        is_reachable = True
+                        connection_target = ip_to_test
+                    except:
+                        is_reachable = False
+                        
+            if is_reachable and connection_target:
                 for item_dir in os.listdir(target_path):
                     item_path = os.path.join(target_path, item_dir)
                     meta_path = os.path.join(item_path, "metadata.json")
@@ -1484,17 +1897,49 @@ class GhostEngine:
                     
                     if os.path.exists(meta_path) and os.path.exists(data_path):
                         try:
-                            with open(meta_path, 'r') as f:
-                                meta = json.load(f)
-                                
-                            print(f"[DTN Spool] Peer {target_dir} is reachable. Forwarding spooled file: {meta['original_filename']}")
-                            success = self._send_spooled_file(target_dir, data_path, meta)
-                            if success:
-                                import shutil
-                                shutil.rmtree(item_path)
-                                print(f"[DTN Spool] Spooled item sent successfully and removed: {meta['original_filename']}")
+                            meta = self._read_spool_metadata(meta_path)
+                            if meta:
+                                print(f"[DTN Spool] Peer {resolved_peer_id} is reachable. Forwarding spooled file: {meta['original_filename']}")
+                                success = self._send_spooled_file(connection_target, data_path, meta)
+                                if success:
+                                    import shutil
+                                    shutil.rmtree(item_path)
+                                    print(f"[DTN Spool] Spooled item sent successfully and removed: {meta['original_filename']}")
                         except Exception as e:
                             print(f"[DTN Spool] Error sending spooled item {item_dir}: {e}")
+            else:
+                # Target is offline - duplicate/replicate to active candidate carrier peers
+                candidate_peers = set()
+                if self.routing_table:
+                    candidate_peers.update(self.routing_table.get_direct_peers())
+                if self.connection_manager:
+                    for conn_id, conn in self.connection_manager.active_connections.items():
+                        if conn.state.value == 'connected':
+                            candidate_peers.add(conn_id)
+                            
+                for item_dir in os.listdir(target_path):
+                    item_path = os.path.join(target_path, item_dir)
+                    meta_path = os.path.join(item_path, "metadata.json")
+                    data_path = os.path.join(item_path, "file.dat")
+                    
+                    if os.path.exists(meta_path) and os.path.exists(data_path):
+                        try:
+                            meta = self._read_spool_metadata(meta_path)
+                            if meta:
+                                replicated_to = meta.get("replicated_to", [])
+                                
+                                for peer in candidate_peers:
+                                    peer_hash = hashlib.sha256(peer.encode()).hexdigest()
+                                    if peer_hash != target_dir and peer != self.peer_id and peer not in replicated_to:
+                                        print(f"[Epidemic Routing] Replicating spooled file '{meta['original_filename']}' to intermediate carrier {peer}")
+                                        success = self._send_spooled_file(peer, data_path, meta)
+                                        if success:
+                                            replicated_to.append(peer)
+                                            meta["replicated_to"] = replicated_to
+                                            self._write_spool_metadata(meta_path, meta)
+                                            print(f"[Epidemic Routing] Replicated successfully to carrier {peer}")
+                        except Exception as e:
+                            print(f"[Epidemic Routing] Error replicating item {item_dir}: {e}")
 
     def _send_spooled_file(self, target, file_path, meta):
         try:
@@ -1505,6 +1950,11 @@ class GhostEngine:
             file_id = meta["file_id"]
             ttl = meta.get("ttl")
             
+            final_target = meta.get("target") or target
+            hash_target = final_target
+            if len(hash_target) != 64 or not all(c in '0123456789abcdefABCDEF' for c in hash_target):
+                hash_target = hashlib.sha256(final_target.encode()).hexdigest()
+                
             header = {
                 "type": "FILE",
                 "filename": filename,
@@ -1513,7 +1963,8 @@ class GhostEngine:
                 "checksum": checksum,
                 "chunked": use_chunking,
                 "timestamp": datetime.now().isoformat(),
-                "target_peer_id": target,
+                "target_peer_id": hash_target,
+                "sender_peer_id": self.peer_id,
                 "network_ttl": 10
             }
             if ttl is not None and ttl > 0:
@@ -1533,7 +1984,7 @@ class GhostEngine:
                 try:
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     sock.settimeout(10.0)
-                    sock.connect((target, self.TCP_PORT))
+                    sock.connect((target, self._get_peer_port(target)))
                 except:
                     return False
                     
@@ -1664,19 +2115,71 @@ class GhostEngine:
                         header_copy['network_ttl'] = ttl - 1
                         
                         header_json = json.dumps(header_copy)
-                        encrypted_header = self._encrypt_message(header_json)
+                        
+                        next_hop_aes_key = None
+                        if self.crypto_manager:
+                            next_hop_aes_key = self.crypto_manager.get_peer_aes_key(next_hop_id)
+                        
+                        if next_hop_aes_key:
+                            try:
+                                import base64
+                                from cryptography.fernet import Fernet
+                                fernet_key = base64.urlsafe_b64encode(next_hop_aes_key)
+                                peer_cipher = Fernet(fernet_key)
+                                encrypted_header = peer_cipher.encrypt(header_json.encode('utf-8'))
+                                print(f"[Onion] Encrypted header using derived AES key for next hop: {next_hop_id}")
+                            except Exception as e:
+                                print(f"[Onion] Header encryption failed: {e}. Falling back to daily key.")
+                                encrypted_header = self._encrypt_message(header_json)
+                        else:
+                            encrypted_header = self._encrypt_message(header_json)
                         
                         try:
                             client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                             client_socket.settimeout(5.0)
-                            client_socket.connect((ip, self.TCP_PORT))
+                            client_socket.connect((ip, self._get_peer_port(ip)))
                             
                             client_socket.sendall(encrypted_header + self.HEADER_DELIMITER + payload)
                             client_socket.close()
                             
                             print(f"[Relay] Forwarded packet for {target_peer_id} via {next_hop_id} (TTL: {ttl-1})")
                         except Exception as e:
-                            print(f"[Relay] Forward to {ip} failed: {e}")
+                            print(f"[Relay] Forward to {ip} failed: {e}. Trying multipath fallback...")
+                            if self.routing_table:
+                                direct_peers = self.routing_table.get_direct_peers()
+                                for fallback_peer_id in direct_peers:
+                                    if fallback_peer_id != next_hop_id and fallback_peer_id != self.peer_id:
+                                        # Find IP for fallback_peer_id
+                                        for f_ip, f_info in self.peers.items():
+                                            if f_info.get('peer_id') == fallback_peer_id:
+                                                try:
+                                                    print(f"[Relay] Attempting fallback forwarding via {fallback_peer_id} ({f_ip})")
+                                                    fallback_aes_key = None
+                                                    if self.crypto_manager:
+                                                        fallback_aes_key = self.crypto_manager.get_peer_aes_key(fallback_peer_id)
+                                                    
+                                                    if fallback_aes_key:
+                                                        try:
+                                                            import base64
+                                                            from cryptography.fernet import Fernet
+                                                            fernet_key = base64.urlsafe_b64encode(fallback_aes_key)
+                                                            peer_cipher = Fernet(fernet_key)
+                                                            fallback_encrypted_header = peer_cipher.encrypt(header_json.encode('utf-8'))
+                                                            print(f"[Onion] Encrypted fallback header using derived AES key for next hop: {fallback_peer_id}")
+                                                        except Exception as ex:
+                                                            fallback_encrypted_header = encrypted_header
+                                                    else:
+                                                        fallback_encrypted_header = encrypted_header
+                                                    
+                                                    fallback_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                                                    fallback_socket.settimeout(5.0)
+                                                    fallback_socket.connect((f_ip, self._get_peer_port(f_ip)))
+                                                    fallback_socket.sendall(fallback_encrypted_header + self.HEADER_DELIMITER + payload)
+                                                    fallback_socket.close()
+                                                    print(f"[Relay] Fallback forwarding successful via {fallback_peer_id}!")
+                                                    return
+                                                except Exception as ex:
+                                                    print(f"[Relay] Fallback via {fallback_peer_id} failed: {ex}")
                         return
         
         except Exception as e:
@@ -1757,6 +2260,21 @@ class GhostEngine:
             'message': message
         }
         
+        # Sign the SOS payload
+        import base64
+        sig_data = json.dumps(sos_payload, sort_keys=True).encode('utf-8')
+        signature = b""
+        signing_pubkey = b""
+        if self.crypto_manager:
+            try:
+                signature = self.crypto_manager.sign_data(sig_data)
+                signing_pubkey = self.crypto_manager.get_signing_public_key_bytes()
+            except Exception as e:
+                print(f"[GhostEngine] SOS signing failed: {e}")
+        
+        sos_payload['signature'] = base64.b64encode(signature).decode('utf-8') if signature else ""
+        sos_payload['signing_pubkey'] = base64.b64encode(signing_pubkey).decode('utf-8') if signing_pubkey else ""
+        
         sos_json = json.dumps(sos_payload)
         encrypted_sos = self._encrypt_message(sos_json)
         
@@ -1776,7 +2294,7 @@ class GhostEngine:
                 try:
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     sock.settimeout(3)
-                    sock.connect((peer_ip, self.TCP_PORT))
+                    sock.connect((peer_ip, self._get_peer_port(peer_ip)))
                     
                     header = {
                         'type': 'message',
@@ -1835,7 +2353,7 @@ class GhostEngine:
                     try:
                         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                         sock.settimeout(3)
-                        sock.connect((peer_ip, self.TCP_PORT))
+                        sock.connect((peer_ip, self._get_peer_port(peer_ip)))
                         
                         header = {
                             'type': 'message',
@@ -1864,6 +2382,50 @@ class GhostEngine:
         with self.peers_lock:
             peer = self.peers.get(ip)
             return peer["username"] if peer else "Unknown"
+
+    def _chaffing_worker(self):
+        """Broadcast dummy packets (chaff) at randomized intervals to mask active conversations."""
+        import random
+        while self.running:
+            try:
+                # Sleep first for a random duration between 30 and 60 seconds
+                sleep_dur = random.randint(30, 60)
+                # Check running state periodically to exit quickly on shutdown
+                for _ in range(sleep_dur):
+                    if not self.running:
+                        break
+                    time.sleep(1)
+                
+                if not self.running:
+                    break
+                
+                # If chaffing is enabled, UDP socket exists, and battery is not low, send dummy packet
+                is_low_battery = False
+                try:
+                    if self._get_battery_level() < 20:
+                        is_low_battery = True
+                except:
+                    pass
+                    
+                if getattr(self, "chaffing_enabled", False) and self.udp_socket and not is_low_battery:
+                    noise_len = random.randint(32, 128)
+                    import os
+                    noise = os.urandom(noise_len).hex()
+                    
+                    chaff_packet = {
+                        "type": "CHAFF",
+                        "noise": noise
+                    }
+                    message = json.dumps(chaff_packet).encode('utf-8')
+                    # Broadcast to 255.255.255.255
+                    self.udp_socket.sendto(message, ('<broadcast>', self.UDP_PORT))
+                    print("[Chaffing] Broadcasted dummy packet")
+            except (OSError, AttributeError):
+                # Socket error or closed during shutdown
+                pass
+            except Exception as e:
+                if self.running:
+                    print(f"[Chaffing] Error sending chaff: {e}")
 
 
 # Test the engine

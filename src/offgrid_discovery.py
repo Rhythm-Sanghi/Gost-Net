@@ -153,6 +153,25 @@ class OffGridPeerDiscovery:
             self.bluetooth.enable()
             print("[BluetoothDiscovery] Enabled")
             
+            # Start BLE Advertising and Scanning
+            service_uuid = "447d5f51-7a8b-4d6f-a9c2-1234567890ab"
+            try:
+                self.bluetooth.start_ble_advertising(service_uuid, "GhostNode")
+                print("[BluetoothDiscovery] BLE advertising started")
+            except Exception as e:
+                print(f"[BluetoothDiscovery] BLE advertising failed: {e}")
+                
+            try:
+                def on_ble_device_found(device, rssi, name):
+                    # device can be a real android BluetoothDevice or dummy device, getAddress() returns address
+                    addr = device.getAddress()
+                    self.peer_tracker.add_bluetooth_peer(addr, name, rssi)
+                    
+                self.bluetooth.start_ble_scanning(service_uuid, on_ble_device_found)
+                print("[BluetoothDiscovery] BLE scanning started")
+            except Exception as e:
+                print(f"[BluetoothDiscovery] BLE scanning failed: {e}")
+            
             def _bt_worker():
                 while self.running:
                     try:
@@ -177,6 +196,14 @@ class OffGridPeerDiscovery:
     
     def stop(self):
         self.running = False
+        try:
+            self.bluetooth.stop_ble_advertising()
+        except:
+            pass
+        try:
+            self.bluetooth.stop_ble_scanning()
+        except:
+            pass
         print("[OffGridDiscovery] Stopped")
     
     def get_all_peers(self) -> Dict[str, dict]:

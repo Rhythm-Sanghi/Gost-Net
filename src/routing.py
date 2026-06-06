@@ -13,6 +13,7 @@ class RouteEntry:
     last_updated: float
     hops: List[str] = field(default_factory=list)
     is_direct: bool = False
+    battery_level: int = 100
 
 
 class RoutingTable:
@@ -30,7 +31,7 @@ class RoutingTable:
                 self.peers_seen[observer_id] = set()
             self.peers_seen[observer_id] = set(observed_peer_ids)
     
-    def add_direct_route(self, peer_id: str):
+    def add_direct_route(self, peer_id: str, battery_level: int = 100):
         with self.lock:
             entry = RouteEntry(
                 destination_peer_id=peer_id,
@@ -38,27 +39,33 @@ class RoutingTable:
                 metric=0,
                 last_updated=time.time(),
                 hops=[peer_id],
-                is_direct=True
+                is_direct=True,
+                battery_level=battery_level
             )
             self.routes[peer_id] = entry
             self.table_version += 1
             return True
     
-    def add_route(self, destination_id: str, next_hop_id: str, metric: int, hops: List[str]):
-        if metric > 15:
+    def add_route(self, destination_id: str, next_hop_id: str, metric: int, hops: List[str], next_hop_battery: int = 100):
+        adjusted_metric = metric
+        if next_hop_battery < 20:
+            adjusted_metric += 5
+            
+        if adjusted_metric > 15:
             return False
         
         with self.lock:
             if destination_id in self.routes:
                 existing = self.routes[destination_id]
-                if metric < existing.metric or (metric == existing.metric and time.time() - existing.last_updated > 5):
+                if adjusted_metric < existing.metric or (existing.next_hop_id == next_hop_id and adjusted_metric != existing.metric) or (adjusted_metric == existing.metric and time.time() - existing.last_updated > 5):
                     self.routes[destination_id] = RouteEntry(
                         destination_peer_id=destination_id,
                         next_hop_id=next_hop_id,
-                        metric=metric,
+                        metric=adjusted_metric,
                         last_updated=time.time(),
                         hops=hops,
-                        is_direct=False
+                        is_direct=False,
+                        battery_level=next_hop_battery
                     )
                     self.table_version += 1
                     return True
@@ -67,10 +74,11 @@ class RoutingTable:
                 self.routes[destination_id] = RouteEntry(
                     destination_peer_id=destination_id,
                     next_hop_id=next_hop_id,
-                    metric=metric,
+                    metric=adjusted_metric,
                     last_updated=time.time(),
                     hops=hops,
-                    is_direct=False
+                    is_direct=False,
+                    battery_level=next_hop_battery
                 )
                 self.table_version += 1
                 return True

@@ -5,6 +5,7 @@ Offline-first, local network communication with file transfer support.
 """
 
 import os
+from typing import Optional
 try:
     from kivy.utils import platform as _kivy_platform
     _is_android = (_kivy_platform == 'android')
@@ -304,21 +305,15 @@ class LockScreen(MDScreen):
         pin_type = self.auth_manager.identify_pin(pin)
         
         if pin_type == 'master':
-            self.transition_to_radar()
+            self.status_label.text = 'Unlocking...'
+            app = MDApp.get_running_app()
+            # Start database decryption and network boot in background thread
+            threading.Thread(target=app.post_unlock_startup, args=(pin,), daemon=True).start()
         elif pin_type == 'duress':
             self.trigger_duress_protocol()
         else:
             self.status_label.text = 'Invalid PIN'
             self.pin_field.text = ''
-    
-    def transition_to_radar(self):
-        app = MDApp.get_running_app()
-        if app and app.root:
-            try:
-                app.root.current = 'radar'
-            except Exception as e:
-                self.status_label.text = f'Error: {str(e)}'
-                print(f"[LockScreen] Transition error: {e}")
     
     def trigger_duress_protocol(self):
         if self.shredding_in_progress:
@@ -335,16 +330,62 @@ class LockScreen(MDScreen):
                 if app:
                     app.decoy_mode = True
                 
+                import sqlite3
+                from security import shred_file
+                from database import PersistenceDatabase
+                from storage import DatabaseManager
+                
+                # Activate persistent decoy mode in auth manager
+                if self.auth_manager:
+                    self.auth_manager.activate_decoy_mode()
+                
+                # Securely shred key and config secrets
+                shred_file("secret.key.enc")
+                shred_file("secret.key")
+                shred_file("signing.key.enc")
+                
+                # Shred active DB or initialize decoy DB and shred it
                 if app and app.persistence_db:
                     app.persistence_db.shred_everything()
                     app.persistence_db.recreate_and_populate_mock_data()
+                else:
+                    decoy_db = PersistenceDatabase()
+                    decoy_db.shred_everything()
+                    decoy_db.recreate_and_populate_mock_data()
+                    if app:
+                        app.persistence_db = decoy_db
                 
                 audio_manager = get_audio_manager()
                 audio_manager.shred_cache()
                 
+                # Clear and shred telemetry logs
+                from telemetry_logger import get_telemetry_logger
+                telemetry = get_telemetry_logger()
+                with telemetry.buffer_lock:
+                    telemetry.buffer.clear()
+                shred_file(telemetry.get_log_path())
+                
                 if hasattr(app, 'crypto_manager') and app.crypto_manager:
                     app.crypto_manager.shred_all_keys()
                 
+                # Shred storage DB
+                try:
+                    if app and hasattr(app, 'db_manager') and app.db_manager:
+                        app.db_manager.close()
+                except:
+                    pass
+                shred_file("ghostnet.db")
+                decoy_storage = DatabaseManager(db_path="ghostnet.db")
+                if app:
+                    app.db_manager = decoy_storage
+                try:
+                    decoy_storage.save_peer("192.168.0.100", "Alice")
+                    decoy_storage.save_message("192.168.0.100", "PEER", "All quiet here. Stay safe.", "TEXT")
+                except Exception as e:
+                    print(f"[LockScreen] Decoy storage population error: {e}")
+                
+                if app:
+                    app.start_decoy_simulator()
                 Clock.schedule_once(lambda dt: self.show_decoy_radar(), 0)
             except Exception as e:
                 print(f"[LockScreen] Shredding error: {e}")
@@ -1179,7 +1220,8 @@ class DiagnosticsScreen(MDScreen):
                 enc_filename = f'mission_telemetry_{timestamp}.enc'
                 temp_enc_path = os.path.join(os.path.dirname(log_path), enc_filename)
                 
-                if not encrypt_telemetry_file(log_path, temp_enc_path):
+                cipher = self.db_manager.cipher if (hasattr(self, 'db_manager') and self.db_manager and self.db_manager.cipher) else None
+                if not encrypt_telemetry_file(log_path, temp_enc_path, cipher):
                     Clock.schedule_once(lambda dt: setattr(self.export_status_label, 'text', 'Encryption failed'), 0)
                     return
                 
@@ -1187,7 +1229,8 @@ class DiagnosticsScreen(MDScreen):
                 
                 if final_path:
                     try:
-                        os.remove(temp_enc_path)
+                        from security import shred_file
+                        shred_file(temp_enc_path)
                     except:
                         pass
                     
@@ -1250,7 +1293,7 @@ class RadarScreen(MDScreen):
             halign='center',
             font_style='Display',
             role='small',
-            size_hint_x=0.6
+            size_hint_x=0.5
         )
         title.bind(on_touch_down=self.on_title_tap)
         self.title_widget = title
@@ -1277,9 +1320,16 @@ class RadarScreen(MDScreen):
         )
         map_btn.bind(on_release=self.open_map)
         
+        notes_btn = MDIconButton(
+            icon='note-text',
+            size_hint_x=0.1
+        )
+        notes_btn.bind(on_release=self.open_notes)
+        
         header.add_widget(title)
         header.add_widget(self.network_badge)
         header.add_widget(map_btn)
+        header.add_widget(notes_btn)
         header.add_widget(settings_btn)
         layout.add_widget(header)
         
@@ -1403,6 +1453,9 @@ class RadarScreen(MDScreen):
             username = info['username']
             visible_peers = info.get('visible_peers', [])
             peer_id = info.get('peer_id', ip)
+            battery = info.get('battery')
+            if battery is not None:
+                username = f"{username} (🔋 {battery}%)"
             
             item_height = dp(60)
             route_text = None
@@ -1506,6 +1559,11 @@ class RadarScreen(MDScreen):
             app.root.current = 'map'
         else:
             print("[RadarScreen] MapView not available")
+            
+    def open_notes(self, *args):
+        """Navigate to collaborative notes screen."""
+        app = MDApp.get_running_app()
+        app.root.current = 'notes'
     
     def show_active_peers(self, *args):
         """Switch to active peers tab."""
@@ -2819,7 +2877,137 @@ class SettingsScreen(MDScreen):
         map_content.add_widget(self.map_path_label)
         map_content.add_widget(map_select_btn)
         map_card.add_widget(map_content)
+        map_card.height = dp(140)
         settings_content.add_widget(map_card)
+        
+        # Steganography Settings Section
+        stego_card = self._create_section_card(
+            "📷 Steganography Settings",
+            "Hide messages inside carrier images"
+        )
+        stego_card.height = dp(180)
+        
+        stego_content = MDBoxLayout(
+            orientation='vertical',
+            adaptive_height=True,
+            spacing=dp(10),
+            padding=dp(10)
+        )
+        
+        stego_switch_layout = MDBoxLayout(
+            orientation='horizontal',
+            adaptive_height=True,
+            spacing=dp(10)
+        )
+        
+        stego_switch_label = MDLabel(
+            text="Enable Steganography",
+            font_style='Body',
+            role='large',
+            size_hint_x=0.7
+        )
+        
+        self.stego_switch = MDSwitch(
+            size_hint_x=0.3,
+            pos_hint={'center_y': 0.5}
+        )
+        self.stego_switch.bind(active=self.on_stego_changed)
+        
+        stego_switch_layout.add_widget(stego_switch_label)
+        stego_switch_layout.add_widget(self.stego_switch)
+        
+        self.stego_path_label = MDLabel(
+            text="Carrier Image: Default (Dynamic)",
+            font_style='Body',
+            role='small',
+            theme_text_color='Secondary',
+            size_hint_y=None,
+            height=dp(30)
+        )
+        
+        stego_select_btn = MDButton(style='elevated')
+        stego_select_btn.add_widget(MDButtonText(text="Select Carrier PNG"))
+        stego_select_btn.bind(on_release=self.open_carrier_file_picker)
+        
+        stego_content.add_widget(stego_switch_layout)
+        stego_content.add_widget(self.stego_path_label)
+        stego_content.add_widget(stego_select_btn)
+        stego_card.add_widget(stego_content)
+        settings_content.add_widget(stego_card)
+        
+        # Anonymity Section
+        anonymity_card = self._create_section_card(
+            "🛡️ Advanced Anonymity",
+            "Configure RAM-only chats & dummy traffic"
+        )
+        anonymity_card.height = dp(220)
+        
+        anonymity_content = MDBoxLayout(
+            orientation='vertical',
+            adaptive_height=True,
+            spacing=dp(15),
+            padding=dp(10)
+        )
+        
+        # Ephemeral Mode Switch
+        ephemeral_layout = MDBoxLayout(
+            orientation='horizontal',
+            adaptive_height=True,
+            spacing=dp(10),
+            size_hint_y=None,
+            height=dp(40)
+        )
+        ephemeral_label = MDLabel(
+            text="Ephemeral Mode (RAM-only)",
+            font_style='Body',
+            role='large',
+            size_hint_x=0.7
+        )
+        self.ephemeral_switch = MDSwitch(
+            size_hint_x=0.3,
+            pos_hint={'center_y': 0.5}
+        )
+        self.ephemeral_switch.bind(active=self.on_ephemeral_changed)
+        ephemeral_layout.add_widget(ephemeral_label)
+        ephemeral_layout.add_widget(self.ephemeral_switch)
+        
+        # Chaffing Switch
+        chaffing_layout = MDBoxLayout(
+            orientation='horizontal',
+            adaptive_height=True,
+            spacing=dp(10),
+            size_hint_y=None,
+            height=dp(40)
+        )
+        chaffing_label = MDLabel(
+            text="Background Dummy Traffic (Chaffing)",
+            font_style='Body',
+            role='large',
+            size_hint_x=0.7
+        )
+        self.chaffing_switch = MDSwitch(
+            size_hint_x=0.3,
+            pos_hint={'center_y': 0.5}
+        )
+        self.chaffing_switch.bind(active=self.on_chaffing_changed)
+        chaffing_layout.add_widget(chaffing_label)
+        chaffing_layout.add_widget(self.chaffing_switch)
+        
+        # Identity Fingerprint Label
+        self.fingerprint_label = MDLabel(
+            text="Fingerprint: Loading...",
+            font_style='Body',
+            role='small',
+            theme_text_color='Secondary',
+            size_hint_y=None,
+            height=dp(40)
+        )
+        
+        anonymity_content.add_widget(ephemeral_layout)
+        anonymity_content.add_widget(chaffing_layout)
+        anonymity_content.add_widget(self.fingerprint_label)
+        anonymity_card.add_widget(anonymity_content)
+        settings_content.add_widget(anonymity_card)
         
         # 5. Danger Zone
         danger_card = self._create_section_card(
@@ -2919,6 +3107,27 @@ class SettingsScreen(MDScreen):
                 self.map_path_label.text = f"Offline Map: {os.path.basename(mbtiles_path)}"
             else:
                 self.map_path_label.text = "Offline Map: Not Selected"
+                
+            # Load stego config
+            self.stego_switch.active = app.config.get("steganography_enabled", False)
+            carrier_path = app.config.get("carrier_image_path", "")
+            if carrier_path:
+                self.stego_path_label.text = f"Carrier Image: {os.path.basename(carrier_path)}"
+            else:
+                self.stego_path_label.text = "Carrier Image: Default (Dynamic)"
+                
+            # Load ephemeral config
+            self.ephemeral_switch.active = app.config.get("ephemeral_mode", False)
+            
+            # Load chaffing config
+            self.chaffing_switch.active = app.config.get("chaffing_enabled", False)
+            
+            # Load identity fingerprint
+            fingerprint = app.get_identity_fingerprint()
+            if fingerprint:
+                self.fingerprint_label.text = f"Fingerprint: {fingerprint[:16]}...{fingerprint[-16:]}"
+            else:
+                self.fingerprint_label.text = "Fingerprint: Unavailable (Offline)"
         else:
             print("[SettingsScreen] Config not available, using defaults")
             self.username_field.text = "GhostUser"
@@ -2926,6 +3135,49 @@ class SettingsScreen(MDScreen):
             self.retention_label.text = "Message Retention: 24 hours"
             self.dark_mode_switch.active = True
             self.map_path_label.text = "Offline Map: Not Selected"
+            self.stego_switch.active = False
+            self.stego_path_label.text = "Carrier Image: Default (Dynamic)"
+            self.ephemeral_switch.active = False
+            self.chaffing_switch.active = False
+            self.fingerprint_label.text = "Fingerprint: Unavailable (Offline)"
+            
+    def on_stego_changed(self, active):
+        app = MDApp.get_running_app()
+        if app and app.config:
+            app.config.set("steganography_enabled", active)
+            app.config.save()
+            print(f"[Settings] Steganography mode: {active}")
+            
+    def open_carrier_file_picker(self, *args):
+        try:
+            from kivymd.uix.filemanager import MDFileManager
+            
+            def exit_manager(*args):
+                self.carrier_file_manager.close()
+                
+            def select_path(path):
+                self.carrier_file_manager.close()
+                if path.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    app = MDApp.get_running_app()
+                    if app and app.config:
+                        app.config.set("carrier_image_path", path)
+                        app.config.save()
+                        self.stego_path_label.text = f"Carrier Image: {os.path.basename(path)}"
+                        print(f"[Settings] Selected carrier image path: {path}")
+                else:
+                    print("[Settings] Selected file must be a PNG or JPG file")
+            
+            self.carrier_file_manager = MDFileManager(
+                exit_manager=exit_manager,
+                select_path=select_path,
+                preview=False
+            )
+            start_path = "/"
+            if os.name == 'nt':
+                start_path = "C:\\"
+            self.carrier_file_manager.show(start_path)
+        except Exception as e:
+            print(f"[Settings] Carrier file picker error: {e}")
             
     def open_map_file_picker(self, *args):
         try:
@@ -3004,6 +3256,26 @@ class SettingsScreen(MDScreen):
             print(f"[Settings] Dark mode {'enabled' if value else 'disabled'}")
         else:
             print("[Settings] Config not available, cannot update dark mode")
+            
+    def on_ephemeral_changed(self, instance, active):
+        app = MDApp.get_running_app()
+        if app and app.config:
+            app.config.set("ephemeral_mode", active)
+            app.config.save()
+            print(f"[Settings] Ephemeral Mode changed to {active}")
+            if app.persistence_db:
+                app.persistence_db.ephemeral_mode = active
+            if app.engine and app.engine.db_manager:
+                app.engine.db_manager.ephemeral_mode = active
+                
+    def on_chaffing_changed(self, instance, active):
+        app = MDApp.get_running_app()
+        if app and app.config:
+            app.config.set("chaffing_enabled", active)
+            app.config.save()
+            print(f"[Settings] Chaffing enabled changed to {active}")
+            if app.engine:
+                app.engine.chaffing_enabled = active
     
     def show_about_dialog(self, *args):
         """Show about dialog with app information."""
@@ -3158,17 +3430,31 @@ class SettingsScreen(MDScreen):
         
         # Delete database
         try:
+            from security import shred_file
             if os.path.exists("ghostnet.db"):
-                os.remove("ghostnet.db")
-                print("[PANIC MODE] Database deleted")
+                shred_file("ghostnet.db")
+                print("[PANIC MODE] Database shredded")
+            if os.path.exists("ghostnet_persistence.db"):
+                shred_file("ghostnet_persistence.db")
+                print("[PANIC MODE] Persistence Database shredded")
         except Exception as e:
             print(f"[PANIC MODE] Database deletion error: {e}")
         
         # Delete encryption key
         try:
+            from security import shred_file
             if os.path.exists("secret.key"):
-                os.remove("secret.key")
-                print("[PANIC MODE] Encryption key deleted")
+                shred_file("secret.key")
+                print("[PANIC MODE] Plaintext encryption key shredded")
+            if os.path.exists("secret.key.enc"):
+                shred_file("secret.key.enc")
+                print("[PANIC MODE] Encrypted encryption key shredded")
+            if os.path.exists(".db_salt"):
+                shred_file(".db_salt")
+                print("[PANIC MODE] Database salt shredded")
+            if os.path.exists(".auth_secrets"):
+                shred_file(".auth_secrets")
+                print("[PANIC MODE] Auth secrets shredded")
         except Exception as e:
             print(f"[PANIC MODE] Key deletion error: {e}")
         
@@ -3196,6 +3482,105 @@ class SettingsScreen(MDScreen):
     
     def go_back(self, *args):
         """Return to radar screen."""
+        app = MDApp.get_running_app()
+        app.root.current = 'radar'
+
+
+class NotesScreen(MDScreen):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.name = 'notes'
+        self.notes_file = "notes.txt"
+        
+        layout = MDBoxLayout(orientation='vertical', padding=dp(20), spacing=dp(10))
+        
+        header = MDBoxLayout(
+            orientation='horizontal',
+            size_hint_y=None,
+            height=dp(60),
+            spacing=dp(10)
+        )
+        
+        back_btn = MDIconButton(icon='arrow-left')
+        back_btn.bind(on_release=self.go_back)
+        
+        title = MDLabel(
+            text='📝 Collaborative Notepad',
+            font_style='Title',
+            role='large',
+            theme_text_color='Primary'
+        )
+        
+        sync_btn = MDIconButton(icon='sync')
+        sync_btn.bind(on_release=self.sync_notes)
+        
+        header.add_widget(back_btn)
+        header.add_widget(title)
+        header.add_widget(sync_btn)
+        layout.add_widget(header)
+        
+        # Multiline text editor for editing notes
+        self.editor = MDTextField(
+            multiline=True,
+            size_hint=(1, 0.9),
+            mode='outlined',
+            theme_text_color='Primary'
+        )
+        self.editor.bind(text=self.on_text_change)
+        
+        layout.add_widget(self.editor)
+        self.add_widget(layout)
+        
+    def on_pre_enter(self):
+        # Load local notes when entering the screen
+        self.load_notes()
+        
+    def load_notes(self):
+        if os.path.exists(self.notes_file):
+            try:
+                with open(self.notes_file, 'r', encoding='utf-8') as f:
+                    self.editor.text = f.read()
+            except Exception as e:
+                print(f"[NotesScreen] Error loading notes: {e}")
+        else:
+            self.editor.text = ""
+            
+    def on_text_change(self, instance, value):
+        # Save dynamically to notes.txt
+        try:
+            with open(self.notes_file, 'w', encoding='utf-8') as f:
+                f.write(value)
+        except Exception as e:
+            print(f"[NotesScreen] Error saving notes: {e}")
+            
+    def sync_notes(self, *args):
+        # Broadcast notes.txt via send_file to all online direct peers
+        app = MDApp.get_running_app()
+        if not app.engine:
+            print("[NotesScreen] Network engine not available")
+            return
+            
+        # Ensure file exists
+        if not os.path.exists(self.notes_file):
+            with open(self.notes_file, 'w', encoding='utf-8') as f:
+                f.write("")
+                
+        # Send file to all direct peers
+        direct_peers = []
+        if app.engine.routing_table:
+            direct_peers = app.engine.routing_table.get_direct_peers()
+            
+        if not direct_peers:
+            print("[NotesScreen] No direct peers online to sync with")
+            return
+            
+        print(f"[NotesScreen] Syncing notes with direct peers: {direct_peers}")
+        for peer in direct_peers:
+            for ip, peer_info in app.engine.peers.items():
+                if peer_info.get('peer_id') == peer:
+                    app.engine.send_file(ip, self.notes_file)
+                    
+    def go_back(self, *args):
         app = MDApp.get_running_app()
         app.root.current = 'radar'
 
@@ -3241,6 +3626,7 @@ class GhostNetApp(MDApp):
         sm.add_widget(DiagnosticsScreen())
         sm.add_widget(ChatScreen())
         sm.add_widget(SettingsScreen())
+        sm.add_widget(NotesScreen())
         if MAPVIEW_AVAILABLE:
             sm.add_widget(MapScreen())
         
@@ -3276,54 +3662,31 @@ class GhostNetApp(MDApp):
         
         self._start_android_service()
         
-        threading.Thread(target=self.startup_checks, daemon=True).start()
+        threading.Thread(target=self.pre_unlock_startup, daemon=True).start()
     
-    def startup_checks(self):
+    def pre_unlock_startup(self):
         """
-        Perform startup initialization in background thread.
-        Updates boot screen status and transitions to boot when complete.
+        Perform basic startup configuration and permission checks before the app is unlocked.
         """
-        def get_boot_screen():
-            try:
-                return self.root.get_screen('boot')
-            except:
-                return None
-        
-        boot_screen = get_boot_screen()
-        if not boot_screen:
-            print("[GhostNet] Boot screen not available")
-            return
-        
         try:
-            # Step 1: Request permissions (move to UI thread to avoid threading issues)
-            # Bug #5 fix: Store boot_screen in self to avoid scope issues
+            # Step 1: Request permissions
             def request_perms_ui():
                 try:
-                    if self.root and self.root.get_screen('boot'):
-                        self.root.get_screen('boot').update_status("Requesting permissions...")
                     self.request_permissions()
                 except Exception as e:
                     print(f"[GhostNet] Permission request error: {e}")
-            
             Clock.schedule_once(lambda dt: request_perms_ui(), 0)
             time.sleep(0.5)
             
-            # Step 2: Load configuration with error handling
-            Clock.schedule_once(
-                lambda dt: boot_screen.update_status("Loading configuration..."),
-                0
-            )
-            
+            # Step 2: Load configuration
             try:
                 self.config = get_config()
             except Exception as e:
                 print(f"[GhostNet] Config initialization error: {e}")
                 self.config = None
-                # Continue with defaults
             
             if self.config:
                 try:
-                    # Apply theme from config
                     theme_style = "Dark" if self.config.is_dark_mode() else "Light"
                     Clock.schedule_once(
                         lambda dt: setattr(self.theme_cls, 'theme_style', theme_style),
@@ -3332,52 +3695,112 @@ class GhostNetApp(MDApp):
                 except Exception as e:
                     print(f"[GhostNet] Theme application error: {e}")
             
-            # Defer callback registration until UI is fully initialized
             def register_config_callback():
                 if self.config:
                     try:
                         self.config.register_change_callback(self.on_config_changed)
                     except Exception as e:
                         print(f"[GhostNet] Config callback registration error: {e}")
-            
             Clock.schedule_once(lambda dt: register_config_callback(), 0.5)
             
-            # Get username from config (with null check)
             if self.config:
                 self.username = self.config.get_username()
             else:
-                print("[GhostNet] Config unavailable, using default username")
                 self.username = "GhostUser"
-            time.sleep(0.5)
             
-            self.persistence_db = None
+            print("[GhostNet] Pre-unlock startup finished. Waiting for PIN entry on LockScreen.")
+            
+        except Exception as e:
+            print(f"[GhostNet] Pre-unlock startup error: {e}")
+            
+    def post_unlock_startup(self, pin: str):
+        """
+        Perform final database and network engine boot sequence once PIN is validated.
+        Runs in a background thread.
+        """
+        from storage import DatabaseManager
+        
+        def get_boot_screen():
             try:
+                return self.root.get_screen('boot')
+            except:
+                return None
+        
+        # Transition to boot screen first
+        Clock.schedule_once(lambda dt: setattr(self.root, 'current', 'boot'), 0)
+        time.sleep(0.5)
+        
+        boot_screen = get_boot_screen()
+        if boot_screen:
+            Clock.schedule_once(
+                lambda dt: boot_screen.update_status("Deriving Master Key..."),
+                0
+            )
+            
+        try:
+            # Derive database key from Master PIN
+            self.db_key = self.auth_manager.get_or_create_db_key(pin)
+            if not self.db_key:
+                print("[GhostNet] ERROR: Could not derive database key.")
+                if boot_screen:
+                    Clock.schedule_once(
+                        lambda dt: boot_screen.update_status("Master Key Derivation Failed!"),
+                        0
+                    )
+                return
+                
+            if boot_screen:
                 Clock.schedule_once(
                     lambda dt: boot_screen.update_status("Initializing database..."),
                     0
                 )
-                self.persistence_db = PersistenceDatabase()
+                
+            self.persistence_db = None
+            try:
+                self.persistence_db = PersistenceDatabase(decrypted_key=self.db_key)
+                if self.auth_manager and self.auth_manager.is_decoy_mode_active():
+                    self.decoy_mode = True
+                    print("[GhostNet] Persistent decoy mode active. Unlocking decoy vault.")
+                    self.start_decoy_simulator()
+                if self.config and self.config.get("ephemeral_mode", False):
+                    self.persistence_db.ephemeral_mode = True
+                    print("[GhostNet] Ephemeral Mode active in database")
                 time.sleep(0.5)
             except Exception as e:
                 print(f"[GhostNet] Persistence database error: {e}")
                 self.persistence_db = None
             
-            Clock.schedule_once(
-                lambda dt: boot_screen.update_status("Starting P2P network..."),
-                0
-            )
+            if boot_screen:
+                Clock.schedule_once(
+                    lambda dt: boot_screen.update_status("Starting P2P network..."),
+                    0
+                )
             
             try:
+                # Instantiate DatabaseManager with decrypted key
+                db_mgr = DatabaseManager(decrypted_key=self.db_key)
+                self.telemetry.set_cipher(db_mgr.cipher)
+                if self.config and self.config.get("ephemeral_mode", False):
+                    db_mgr.ephemeral_mode = True
+                    print("[GhostNet] Ephemeral Mode active in storage database manager")
+                    
+                self.signing_key = self.auth_manager.get_or_create_signing_key(pin)
                 self.engine = GhostEngine(
                     config_manager=self.config,
                     on_message_received=self.handle_message_received,
                     on_peer_update=self.handle_peer_update,
                     on_file_received=self.handle_file_received,
                     persistence_db=self.persistence_db,
-                    enable_storage=True
+                    db_manager=db_mgr,
+                    enable_storage=True,
+                    signing_private_key_bytes=self.signing_key
                 )
                 self.engine.on_sos_received = self.handle_sos_received
                 
+                # Check for chaffing daemon option
+                if self.config and self.config.get("chaffing_enabled", False):
+                    self.engine.chaffing_enabled = True
+                    
                 diag_mgr = get_diagnostics()
                 diag_mgr.set_engine_reference(self.engine)
                 
@@ -3389,43 +3812,41 @@ class GhostNetApp(MDApp):
             except Exception as e:
                 print(f"[GhostNet] Engine initialization error: {e}")
                 self.engine = None
-                # Continue - app can work without networking
             
-            Clock.schedule_once(
-                lambda dt: boot_screen.update_status("Setting up background scrubbing..."),
-                0
-            )
-            
+            if boot_screen:
+                Clock.schedule_once(
+                    lambda dt: boot_screen.update_status("Setting up background scrubbing..."),
+                    0
+                )
             Clock.schedule_interval(self.run_message_scrubbing, 10)
             time.sleep(0.5)
             
-            Clock.schedule_once(
-                lambda dt: boot_screen.update_status("Cleaning old messages..."),
-                0
-            )
-            
+            if boot_screen:
+                Clock.schedule_once(
+                    lambda dt: boot_screen.update_status("Cleaning old messages..."),
+                    0
+                )
             if self.config and self.config.is_auto_cleanup_enabled():
                 retention_hours = self.config.get_retention_hours()
                 self.cleanup_old_messages(hours=retention_hours)
             time.sleep(0.5)
             
-            # Step 6: Complete
-            Clock.schedule_once(
-                lambda dt: boot_screen.update_status("Ready!"),
-                0
-            )
+            if boot_screen:
+                Clock.schedule_once(
+                    lambda dt: boot_screen.update_status("Ready!"),
+                    0
+                )
             time.sleep(0.5)
             
             print(f"[GhostNet] App started as '{self.username}'")
             
-            # Transition to radar (main screen) after successful boot
             Clock.schedule_once(
                 lambda dt: setattr(self.root, 'current', 'radar'),
                 0
             )
             
         except Exception as e:
-            print(f"[GhostNet] Startup error: {e}")
+            print(f"[GhostNet] Post-unlock startup error: {e}")
             import traceback
             traceback.print_exc()
             
@@ -3440,11 +3861,13 @@ class GhostNetApp(MDApp):
             time.sleep(2)
             try:
                 Clock.schedule_once(
-                    lambda dt: setattr(self.root, 'current', 'boot'),
+                    lambda dt: setattr(self.root, 'current', 'lock'),
                     0
                 )
             except Exception as e2:
-                print(f"[GhostNet] Could not transition to boot: {e2}")
+                print(f"[GhostNet] Could not transition to lock: {e2}")
+            
+    
     
     def on_config_changed(self, key: str, old_value, new_value):
         """Handle configuration changes for hot-reloading."""
@@ -3495,6 +3918,16 @@ class GhostNetApp(MDApp):
                 print(f"[Scrubbing] Error: {e}")
         
         threading.Thread(target=_scrub_worker, daemon=True).start()
+        
+    def get_identity_fingerprint(self) -> Optional[str]:
+        import hashlib
+        if self.engine and self.engine.crypto_manager:
+            try:
+                pub_bytes = self.engine.crypto_manager.get_signing_public_key_bytes()
+                return hashlib.sha256(pub_bytes).hexdigest()
+            except Exception as e:
+                print(f"[GhostNetApp] Error getting fingerprint: {e}")
+        return None
     
     def request_permissions(self):
         """Request storage permissions on Android with safe error handling."""
@@ -3610,6 +4043,55 @@ class GhostNetApp(MDApp):
     
     def handle_file_received(self, sender_ip, filename, filepath, timestamp):
         """Handle incoming file from network thread."""
+        if filename == 'notes.txt':
+            local_notes_file = "notes.txt"
+            
+            # Read local lines
+            local_lines = []
+            if os.path.exists(local_notes_file):
+                try:
+                    with open(local_notes_file, 'r', encoding='utf-8') as f:
+                        local_lines = [line.rstrip('\r\n') for line in f]
+                except Exception as e:
+                    print(f"[GhostNetApp] Error reading local notes for merge: {e}")
+            
+            # Read incoming lines
+            incoming_lines = []
+            if os.path.exists(filepath):
+                try:
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        incoming_lines = [line.rstrip('\r\n') for line in f]
+                except Exception as e:
+                    print(f"[GhostNetApp] Error reading incoming notes for merge: {e}")
+            
+            # CRDT line-based merge: keep local lines, append unique lines from incoming_lines that are not already present in local_lines
+            merged_lines = list(local_lines)
+            local_set = set(local_lines)
+            for line in incoming_lines:
+                if line not in local_set:
+                    merged_lines.append(line)
+                    local_set.add(line)
+            
+            # Write back to local notes.txt
+            try:
+                with open(local_notes_file, 'w', encoding='utf-8') as f:
+                    f.write('\n'.join(merged_lines))
+                print(f"[GhostNetApp] Merged notes.txt with incoming lines from {sender_ip}")
+            except Exception as e:
+                print(f"[GhostNetApp] Error writing merged notes: {e}")
+            
+            # Reload the editor if NotesScreen is current
+            def reload_editor_ui(dt):
+                try:
+                    notes_screen = self.root.get_screen('notes')
+                    if notes_screen:
+                        notes_screen.load_notes()
+                except Exception as e:
+                    print(f"[GhostNetApp] Error reloading notes screen UI: {e}")
+            
+            Clock.schedule_once(reload_editor_ui, 0)
+            return
+
         # Schedule UI update on main thread
         Clock.schedule_once(
             lambda dt: self.add_file_to_chat(sender_ip, filename, filepath, timestamp),
@@ -3646,6 +4128,89 @@ class GhostNetApp(MDApp):
                     print(f"[GhostNetApp] Map marker plot error: {map_err}")
         except Exception as e:
             print(f"[GhostNetApp] SOS alert UI error: {e}")
+            
+    def start_decoy_simulator(self):
+        """Starts the background decoy conversation simulator worker."""
+        if hasattr(self, '_decoy_simulator_started') and self._decoy_simulator_started:
+            return
+        self._decoy_simulator_started = True
+        t = threading.Thread(target=self._decoy_simulator_worker, daemon=True)
+        t.start()
+        print("[GhostNet] Decoy simulator worker started.")
+
+    def _decoy_simulator_worker(self):
+        import random
+        import time
+        import sys
+        
+        decoy_peers = ["wfd_alice", "bt_bob", "mesh_charlie"]
+        
+        decoy_messages = {
+            "wfd_alice": [
+                "Signals are stable on the backup channel.",
+                "Moving to alternate frequency sector 4.",
+                "Atmospheric conditions are causing slight delay.",
+                "Let's schedule the next sync checkpoint.",
+                "Status report: all base systems are nominal.",
+                "No signs of activity on the perimeter."
+            ],
+            "bt_bob": [
+                "Approaching rendezvous point Bravo.",
+                "ETA to location is 15 minutes.",
+                "Bringing the secondary communication terminal.",
+                "Bob checking in. Signal strength is good.",
+                "Relaying the latest geographic maps.",
+                "Leaving sector 9 now."
+            ],
+            "mesh_charlie": [
+                "Mesh relay node Charlie online.",
+                "Routing path optimization completed.",
+                "Dynamic beaconing interval set to low-power.",
+                "Forwarded 12 diagnostic logs successfully.",
+                "Relaying distress signal beacons.",
+                "No packet loss detected on the 2.4GHz link."
+            ]
+        }
+        
+        while self.decoy_mode:
+            is_testing = ("pytest" in sys.modules or "unittest" in sys.modules)
+            sleep_time = random.randint(1, 2) if is_testing else random.randint(30, 60)
+            
+            time.sleep(sleep_time)
+            if not self.decoy_mode:
+                break
+                
+            sender = random.choice(decoy_peers)
+            msg = random.choice(decoy_messages[sender])
+            
+            self._inject_decoy_message(sender, msg)
+
+    def _inject_decoy_message(self, sender_ip, message_text):
+        if not self.decoy_mode:
+            return
+        
+        import time
+        from datetime import datetime
+        timestamp_unix = time.time()
+        timestamp_str = datetime.now().strftime("%H:%M:%S")
+        
+        if self.persistence_db:
+            self.persistence_db.save_message(sender_ip, "peer", "text", message_text, timestamp_unix)
+            
+        try:
+            chat_screen = self.root.get_screen('chat')
+            if chat_screen.peer_ip == sender_ip and self.root.current == 'chat':
+                Clock.schedule_once(lambda dt: chat_screen.add_received_message(sender_ip, message_text, timestamp_str), 0)
+            else:
+                peer_names = {
+                    "wfd_alice": "Alice (Base)",
+                    "bt_bob": "Bob (Mobile)",
+                    "mesh_charlie": "Charlie (Relay)"
+                }
+                username = peer_names.get(sender_ip, sender_ip)
+                print(f"[Notification] New message from {username}: {message_text}")
+        except Exception as e:
+            pass
 
 
 if __name__ == '__main__':

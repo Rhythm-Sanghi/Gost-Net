@@ -25,16 +25,20 @@ class DatabaseManager:
     - Privacy-focused cleanup of old messages
     """
     
-    def __init__(self, db_path: str = "ghostnet.db", key_path: str = "secret.key"):
+    def __init__(self, db_path: str = "ghostnet.db", key_path: str = "secret.key", decrypted_key: Optional[bytes] = None):
         """
         Initialize the database manager.
         
         Args:
             db_path: Path to SQLite database file
             key_path: Path to encryption key file
+            decrypted_key: Pre-decrypted key to use (optional)
         """
         self.db_path = db_path
         self.key_path = key_path
+        self.decrypted_key = decrypted_key
+        self.ephemeral_mode = False
+        self.ephemeral_messages = []
         self.cipher = None
         self.db_lock = threading.Lock()
         self.initialization_error = None
@@ -60,6 +64,11 @@ class DatabaseManager:
     def _initialize_encryption(self):
         """Initialize or load the encryption key."""
         try:
+            if self.decrypted_key:
+                self.cipher = Fernet(self.decrypted_key)
+                print("[DatabaseManager] Encryption initialized with memory key")
+                return
+                
             key = self._get_or_create_key()
             if key:
                 self.cipher = Fernet(key)
@@ -130,14 +139,21 @@ class DatabaseManager:
         except Exception as e:
             print(f"[DatabaseManager] Decryption error: {e}")
             return encrypted.decode('utf-8', errors='ignore')
-    
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
+        try:
+            conn.execute('PRAGMA journal_mode = WAL;')
+            conn.execute('PRAGMA synchronous = NORMAL;')
+            conn.execute('PRAGMA busy_timeout = 10000')
+        except Exception as e:
+            print(f"[DatabaseManager] Warning setting PRAGMAs: {e}")
+        return conn
+
     def _initialize_database(self):
         """Create database tables if they don't exist."""
         with self.db_lock:
             try:
-                # Add timeout to prevent hanging on first connection
-                conn = sqlite3.connect(self.db_path, timeout=10.0)
-                conn.execute('PRAGMA busy_timeout = 10000')  # 10 second timeout
+                conn = self._connect()
                 cursor = conn.cursor()
                 
                 # Peers table
@@ -197,7 +213,7 @@ class DatabaseManager:
         conn = None
         with self.db_lock:
             try:
-                conn = sqlite3.connect(self.db_path, timeout=10.0)
+                conn = self._connect()
                 cursor = conn.cursor()
                 
                 cursor.execute('''
@@ -231,7 +247,7 @@ class DatabaseManager:
         conn = None
         with self.db_lock:
             try:
-                conn = sqlite3.connect(self.db_path, timeout=10.0)
+                conn = self._connect()
                 cursor = conn.cursor()
                 
                 cursor.execute('''
@@ -267,11 +283,24 @@ class DatabaseManager:
         """
         if timestamp is None:
             timestamp = time.time()
+            
+        if self.ephemeral_mode:
+            with self.db_lock:
+                self.ephemeral_messages.append({
+                    'id': len(self.ephemeral_messages) + 1,
+                    'peer_ip': peer_ip,
+                    'sender': sender,
+                    'content': content,
+                    'message_type': message_type,
+                    'timestamp': timestamp,
+                    'file_path': file_path
+                })
+            return
         
         conn = None
         with self.db_lock:
             try:
-                conn = sqlite3.connect(self.db_path, timeout=10.0)
+                conn = self._connect()
                 cursor = conn.cursor()
                 
                 # Encrypt content
@@ -307,10 +336,16 @@ class DatabaseManager:
             List of message dictionaries with keys:
             - id, sender, content, message_type, timestamp, file_path
         """
+        if self.ephemeral_mode:
+            with self.db_lock:
+                msgs = [m for m in self.ephemeral_messages if m['peer_ip'] == peer_ip]
+                msgs = sorted(msgs, key=lambda x: x['timestamp'])[-limit:]
+                return msgs
+                
         conn = None
         with self.db_lock:
             try:
-                conn = sqlite3.connect(self.db_path, timeout=10.0)
+                conn = self._connect()
                 cursor = conn.cursor()
                 
                 cursor.execute('''
@@ -365,7 +400,7 @@ class DatabaseManager:
         conn = None
         with self.db_lock:
             try:
-                conn = sqlite3.connect(self.db_path, timeout=10.0)
+                conn = self._connect()
                 cursor = conn.cursor()
                 
                 cursor.execute('''
@@ -411,7 +446,7 @@ class DatabaseManager:
         conn = None
         with self.db_lock:
             try:
-                conn = sqlite3.connect(self.db_path, timeout=10.0)
+                conn = self._connect()
                 cursor = conn.cursor()
                 
                 # Get count before deletion
@@ -453,7 +488,7 @@ class DatabaseManager:
         conn = None
         with self.db_lock:
             try:
-                conn = sqlite3.connect(self.db_path, timeout=10.0)
+                conn = self._connect()
                 cursor = conn.cursor()
                 
                 cursor.execute('''
@@ -486,7 +521,7 @@ class DatabaseManager:
         conn = None
         with self.db_lock:
             try:
-                conn = sqlite3.connect(self.db_path, timeout=10.0)
+                conn = self._connect()
                 cursor = conn.cursor()
                 
                 # Count messages
@@ -570,7 +605,7 @@ class DatabaseManager:
         conn = None
         with self.db_lock:
             try:
-                conn = sqlite3.connect(self.db_path, timeout=10.0)
+                conn = self._connect()
                 conn.execute('VACUUM')
                 print("[DatabaseManager] Database vacuumed successfully")
             except Exception as e:

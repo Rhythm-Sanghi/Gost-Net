@@ -172,38 +172,86 @@ def get_diagnostics():
     return _diagnostics_instance
 
 
-def encrypt_telemetry_file(input_path: str, output_path: str) -> bool:
+def encrypt_telemetry_file(input_path: str, output_path: str, cipher: Optional[object] = None) -> bool:
     try:
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
         from cryptography.hazmat.primitives.kdf.hkdf import HKDF
         from cryptography.hazmat.backends import default_backend
         import os
+        import base64
         
-        diagnostic_key_material = b'ghostnet_diagnostic_export_key_2024'
+        # 1. Load support public key
+        SUPPORT_PUBLIC_KEY_HEX = "040a06512a9218b19eb751ed125222e65b7964f86b210c0e9f338ccce5378e0329130faf0b8cbc647ac2622c5e171ec41ff6972a395fbfc5508729f16d380c1447d81547850acf9f3d54c70681aaa9bf98a21373a9224b8d9c313e0ecd48328415"
+        support_pub_bytes = bytes.fromhex(SUPPORT_PUBLIC_KEY_HEX)
+        support_pub_key = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP384R1(), support_pub_bytes)
+        
+        # 2. Ephemeral EC Keypair for ECDH
+        ephemeral_priv_key = ec.generate_private_key(ec.SECP384R1(), backend=default_backend())
+        shared_secret = ephemeral_priv_key.exchange(ec.ECDH(), support_pub_key)
+        
+        # 3. KDF to derive AES symmetric key
         hkdf = HKDF(
             algorithm=hashes.SHA256(),
             length=32,
-            salt=b'diagnostic_salt',
-            info=b'telemetry_encryption',
+            salt=b'diagnostic_salt_v2',
+            info=b'telemetry_hybrid_encryption',
             backend=default_backend()
         )
-        derived_key = hkdf.derive(diagnostic_key_material)
+        aes_key = hkdf.derive(shared_secret)
         
-        with open(input_path, 'rb') as f:
-            plaintext = f.read()
+        # 4. Decrypt original rows from input_path
+        decrypted_lines = []
+        if os.path.exists(input_path):
+            with open(input_path, 'rb') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    decrypted_line = None
+                    if cipher:
+                        try:
+                            decrypted_line = cipher.decrypt(line).decode('utf-8')
+                        except:
+                            pass
+                    if decrypted_line is None:
+                        if line.startswith(b"BASE64:"):
+                            try:
+                                decrypted_line = base64.b64decode(line[7:]).decode('utf-8')
+                            except:
+                                pass
+                        else:
+                            try:
+                                decrypted_line = line.decode('utf-8')
+                            except:
+                                pass
+                    if decrypted_line is not None:
+                        decrypted_lines.append(decrypted_line)
+                        
+        plaintext = ("\n".join(decrypted_lines)).encode('utf-8')
         
+        # 5. Encrypt plaintext using AES-GCM
         nonce = os.urandom(12)
-        cipher = AESGCM(derived_key)
-        ciphertext = cipher.encrypt(nonce, plaintext, None)
+        aes_cipher = AESGCM(aes_key)
+        ciphertext = aes_cipher.encrypt(nonce, plaintext, None)
         
+        # 6. Ephemeral public key serialization
+        ephemeral_pub_bytes = ephemeral_priv_key.public_key().public_bytes(
+            encoding=serialization.Encoding.X962,
+            format=serialization.PublicFormat.UncompressedPoint
+        )
+        
+        # 7. Write output file structure: [len_epub (4 bytes)] + [epub_bytes] + [nonce (12 bytes)] + [ciphertext]
         with open(output_path, 'wb') as f:
+            f.write(len(ephemeral_pub_bytes).to_bytes(4, 'big'))
+            f.write(ephemeral_pub_bytes)
             f.write(nonce)
             f.write(ciphertext)
-        
+            
         return True
     except Exception as e:
-        print(f"[TelemetryExport] Encryption error: {e}")
+        print(f"[TelemetryExport] Hybrid encryption error: {e}")
         return False
 
 
