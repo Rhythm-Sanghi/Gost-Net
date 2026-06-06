@@ -408,7 +408,7 @@ class LockScreen(MDScreen):
         self.show_decoy_radar()
 
 
-class MapMarkerPopup(MapMarker if MAPVIEW_AVAILABLE else object):
+class GhostMapMarker(MapMarker if MAPVIEW_AVAILABLE else object):
     def __init__(self, lat, lon, title, color=(1, 0, 0, 1), is_user=False, **kwargs):
         if MAPVIEW_AVAILABLE:
             super().__init__(lat=lat, lon=lon, **kwargs)
@@ -543,7 +543,7 @@ class MapScreen(MDScreen):
         
         lat, lon = self.gps_manager.get_coordinates()
         
-        self.user_marker = MapMarkerPopup(
+        self.user_marker = GhostMapMarker(
             lat=lat,
             lon=lon,
             title='Your Location',
@@ -583,7 +583,7 @@ class MapScreen(MDScreen):
             old_marker = self.sos_markers[marker_id]
             self.map_view.remove_widget(old_marker)
         
-        marker = MapMarkerPopup(
+        marker = GhostMapMarker(
             lat=lat,
             lon=lon,
             title=f'SOS: {sender_name}',
