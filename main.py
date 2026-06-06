@@ -417,12 +417,7 @@ class GhostMapMarker(MapMarker if MAPVIEW_AVAILABLE else object):
             self.is_user = is_user
             self.timestamp = None
             self.sender_name = None
-            
-            try:
-                from kivy_garden.mapview import MapSource
-            except ImportError:
-                from kivy.garden.mapview import MapSource
-            self.source = MapSource.cache
+            # Use default MapMarker source
             
             self.bind(on_release=self.on_marker_release)
     
