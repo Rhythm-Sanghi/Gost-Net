@@ -45,6 +45,7 @@ android.allow_backup = False
 
 p4a.log_level = ERROR
 p4a.cython_directives = {"language_level": "3"}
+p4a.local_recipes = ./p4a_recipes
 p4a.release_dir = .buildozer/android/platform/build-{arch}/dist
 android.release_artifact = apk
 

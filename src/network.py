@@ -249,7 +249,8 @@ class GhostEngine:
                 
                 if is_android:
                     # On Android, use app-specific storage
-                    self.downloads_dir = os.path.join(os.path.expanduser("~"), ".ghostnet", "downloads")
+                    base_dir = os.environ.get("ANDROID_PRIVATE") or os.environ.get("PYTHONHOME") or os.path.expanduser("~")
+                    self.downloads_dir = os.path.join(base_dir, ".ghostnet", "downloads")
                 else:
                     # On desktop, use ~/Downloads/GhostNet
                     self.downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads", "GhostNet")

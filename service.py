@@ -26,7 +26,7 @@ if _is_android:
     NotificationCompat = autoclass('androidx.core.app.NotificationCompat')
     NotificationManager = autoclass('android.app.NotificationManager')
     
-    Build = autoclass('android.os.Build')
+    BuildVersion = autoclass('android.os.Build$VERSION')
 
 
 class ServiceNotificationManager:
@@ -37,7 +37,7 @@ class ServiceNotificationManager:
         self._setup_notification_channel()
     
     def _setup_notification_channel(self):
-        if _is_android and Build.VERSION.SDK_INT >= 26:
+        if _is_android and BuildVersion.SDK_INT >= 26:
             try:
                 NotificationChannel = autoclass('android.app.NotificationChannel')
                 Context = autoclass('android.content.Context')

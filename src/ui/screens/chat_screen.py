@@ -273,12 +273,11 @@ class ChatScreen(MDScreen):
         )
 
         # Attachment preview chip (revealed when file is picked)
-        self.attachment_preview = MDCard(
+        self.attachment_preview = MDBoxLayout(
             orientation='horizontal',
-            style='outlined',
             adaptive_height=True,
             size_hint_y=None,
-            height=0,
+            height=dp(1),
             opacity=0,
             disabled=True,
             padding=[dp(12), dp(4), dp(8), dp(4)],
@@ -666,7 +665,7 @@ class ChatScreen(MDScreen):
         self.pending_attachment = None
         if hasattr(self, 'attachment_preview') and self.attachment_preview:
             self.attachment_preview.opacity = 0
-            self.attachment_preview.height = 0
+            self.attachment_preview.height = dp(1)
             self.attachment_preview.disabled = True
 
     def send_message(self, *args):

@@ -27,11 +27,16 @@ class _OpsecLogger:
         global PRODUCTION_MODE
         PRODUCTION_MODE = True
         self.production_mode = True
+        
+        # In debug/qualification mode or if explicitly requested, retain stdio for logcat
+        if os.environ.get("GOSTNET_DISABLE_OPSEC", "").lower() in ("1", "true", "yes") or \
+           os.environ.get("GOSTNET_DEBUG", "").lower() in ("1", "true", "yes"):
+            return
+
         sys.stdout = self.dev_null
         sys.stderr = self.dev_null
         
         try:
-            import os
             self._devnull_file = open(os.devnull, 'w')
             sys.stdout = self._devnull_file
             sys.stderr = self._devnull_file

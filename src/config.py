@@ -62,7 +62,8 @@ class ConfigManager:
         if is_android:
             # On Android, use app-specific storage (don't import kivy.core.window here)
             try:
-                config_path = os.path.join(os.path.expanduser("~"), ".ghostnet", config_path)
+                base_dir = os.environ.get("ANDROID_PRIVATE") or os.environ.get("PYTHONHOME") or os.path.expanduser("~")
+                config_path = os.path.join(base_dir, ".ghostnet", config_path)
                 os.makedirs(os.path.dirname(config_path), exist_ok=True)
             except Exception as e:
                 print(f"[ConfigManager] WARNING: Could not create config directory: {e}")

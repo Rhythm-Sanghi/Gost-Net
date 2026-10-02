@@ -17,6 +17,25 @@ def _safe_import(module_path, name, fallback_class=None):
             return fallback_class
         raise
 
+# Prevent OpenGL FBO crashes (Incomplete attachment 36054) on Android during widget creation
+try:
+    from kivymd.uix.behaviors.ripple_behavior import RectangularRippleBehavior
+    def _noop_init_fbos(self):
+        self._phase = 0.0
+        self.ripple_pos = (0, 0)
+        self.fbo = None
+    RectangularRippleBehavior.init_fbos = _noop_init_fbos
+    
+    _orig_lay = getattr(RectangularRippleBehavior, 'lay_canvas_instructions', None)
+    def _safe_lay(self):
+        if getattr(self, 'fbo', None) is None:
+            return
+        if _orig_lay:
+            return _orig_lay(self)
+    RectangularRippleBehavior.lay_canvas_instructions = _safe_lay
+except Exception:
+    pass
+
 try:
     from kivymd.app import MDApp
     from kivy.metrics import dp
@@ -32,6 +51,11 @@ try:
     from kivymd.uix.boxlayout import MDBoxLayout
     from kivymd.uix.scrollview import MDScrollView
     from kivymd.uix.card import MDCard
+    try:
+        MDCard.init_fbos = _noop_init_fbos
+        MDCard.lay_canvas_instructions = _safe_lay
+    except Exception:
+        pass
     from kivymd.uix.slider import MDSlider
     from kivymd.uix.floatlayout import MDFloatLayout
     
@@ -99,10 +123,15 @@ try:
     
     KIVYMD_AVAILABLE = True
 except ImportError as e:
-    print(f"[CRITICAL] KivyMD import failed: {e}")
-    print("[CRITICAL] Please ensure KivyMD is properly installed")
-    import sys
-    sys.exit(1)
+    import traceback
+    err_msg = f"[CRITICAL] KivyMD import failed: {e}\n{traceback.format_exc()}"
+    try:
+        sys.__stderr__.write(err_msg + "\n")
+        sys.__stderr__.flush()
+    except Exception:
+        pass
+    raise RuntimeError(err_msg) from e
+
 
 
 def apply_premium_background(screen):

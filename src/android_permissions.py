@@ -240,8 +240,8 @@ class PermissionManager:
             self.context = self.activity
 
             # Get API level
-            Build = autoclass('android.os.Build')
-            self.api_level = Build.VERSION.SDK_INT
+            VERSION = autoclass('android.os.Build$VERSION')
+            self.api_level = VERSION.SDK_INT
             logger.info(f"[Permissions] Android API Level: {self.api_level}")
 
             # Initialize event queue and callback dialog
@@ -272,8 +272,8 @@ class PermissionManager:
             return 1
 
         try:
-            Build = autoclass('android.os.Build')
-            return Build.VERSION.SDK_INT
+            VERSION = autoclass('android.os.Build$VERSION')
+            return VERSION.SDK_INT
         except:
             return 1
 
@@ -549,7 +549,7 @@ def get_system_version() -> int:
         return 1
 
     try:
-        Build = autoclass('android.os.Build')
-        return Build.VERSION.SDK_INT
+        VERSION = autoclass('android.os.Build$VERSION')
+        return VERSION.SDK_INT
     except:
         return 1

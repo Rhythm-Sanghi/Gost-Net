@@ -26,13 +26,27 @@ class AudioManager:
         try:
             if is_android:
                 from jnius import autoclass
-                Context = autoclass('android.content.Context')
-                PythonService = autoclass('org.kivy.android.PythonService')
-                service = PythonService.mService
-                cache_dir = service.getCacheDir().getAbsolutePath()
+                import tempfile
+                cache_dir = None
+                try:
+                    PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                    if PythonActivity.mActivity:
+                        cache_dir = PythonActivity.mActivity.getCacheDir().getAbsolutePath()
+                except Exception:
+                    pass
+                if not cache_dir:
+                    try:
+                        PythonService = autoclass('org.kivy.android.PythonService')
+                        if PythonService.mService:
+                            cache_dir = PythonService.mService.getCacheDir().getAbsolutePath()
+                    except Exception:
+                        pass
+                if not cache_dir:
+                    cache_dir = os.environ.get("ANDROID_PRIVATE", tempfile.gettempdir())
                 self.recording_dir = cache_dir
             else:
                 import tempfile
+                self.recording_dir = tempfile.gettempdir()
                 self.recording_dir = tempfile.gettempdir()
             
             os.makedirs(self.recording_dir, exist_ok=True)

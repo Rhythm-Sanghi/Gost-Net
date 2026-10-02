@@ -104,7 +104,7 @@ class LockScreen(MDScreen):
             height=dp(48),
             multiline=False
         )
-        self.setup_pin_field.add_widget(MDTextFieldHintText(text="Create Master PIN (min 4 chars)"))
+        self.setup_pin_field.add_widget(MDTextFieldHintText(text="Create Master PIN (min 6 chars)"))
         card.add_widget(self.setup_pin_field)
         
         self.setup_confirm_field = MDTextField(
@@ -241,15 +241,17 @@ class LockScreen(MDScreen):
         if not callsign:
             self.status_label.text = 'Callsign required'
             return
-        if not master_pin or len(master_pin) < 4:
-            self.status_label.text = 'Master PIN must be >= 4 chars'
+        valid_m, msg_m = self.auth_manager.validate_pin_strength(master_pin)
+        if not valid_m:
+            self.status_label.text = msg_m
             return
         if master_pin != confirm_pin:
             self.status_label.text = 'Master PINs do not match'
             return
         if duress_pin:
-            if len(duress_pin) < 4:
-                self.status_label.text = 'Duress PIN must be >= 4 chars'
+            valid_d, msg_d = self.auth_manager.validate_pin_strength(duress_pin)
+            if not valid_d:
+                self.status_label.text = f"Duress PIN: {msg_d}"
                 return
             if duress_pin == master_pin:
                 self.status_label.text = 'Duress PIN cannot equal Master PIN'

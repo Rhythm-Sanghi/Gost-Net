@@ -24,12 +24,41 @@ try:
 except ImportError:
     _is_android = False
 
-if _is_android:
-    try:
-        from logger import activate_opsec
-        activate_opsec()
-    except Exception:
-        pass
+def _setup_crash_logging():
+    import traceback
+
+    def _handle_exception(exc_type, exc_val, exc_tb):
+        msg = "".join(traceback.format_exception(exc_type, exc_val, exc_tb))
+        try:
+            sys.__stderr__.write(f"[FATAL_STARTUP_CRASH] {msg}\n")
+            sys.__stderr__.flush()
+            sys.__stdout__.write(f"[FATAL_STARTUP_CRASH] {msg}\n")
+            sys.__stdout__.flush()
+        except Exception:
+            pass
+
+        candidate_dirs = [
+            os.path.dirname(os.path.abspath(__file__)),
+            os.path.expanduser("~"),
+            "/data/user/0/org.ghostnet.ghostnet/files/app",
+            "."
+        ]
+        for cdir in candidate_dirs:
+            try:
+                log_file = os.path.join(cdir, "startup-crash.log")
+                with open(log_file, "a") as f:
+                    f.write(f"\n--- FATAL CRASH {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n{msg}\n")
+                break
+            except Exception:
+                continue
+
+    sys.excepthook = _handle_exception
+    if hasattr(threading, 'excepthook'):
+        def _thread_hook(args):
+            _handle_exception(args.exc_type, args.exc_value, args.exc_traceback)
+        threading.excepthook = _thread_hook
+
+_setup_crash_logging()
 
 # UI Components, Screens, and Framework shims (re-exported for backwards compatibility)
 from ui import (
@@ -114,7 +143,7 @@ class GhostNetApp(MDApp):
                 PythonActivity = autoclass('org.kivy.android.PythonActivity')
                 activity = PythonActivity.mActivity
                 Intent = autoclass('android.content.Intent')
-                Build = autoclass('android.os.Build')
+                BuildVersion = autoclass('android.os.Build$VERSION')
                 
                 service_classes = [
                     'org.ghostnet.ghostnet.ServiceGhostservice',
@@ -131,7 +160,7 @@ class GhostNetApp(MDApp):
                 
                 if service_class and activity:
                     intent = Intent(activity, service_class)
-                    if Build.VERSION.SDK_INT >= 26:
+                    if BuildVersion.SDK_INT >= 26:
                         activity.startForegroundService(intent)
                     else:
                         activity.startService(intent)
@@ -839,4 +868,31 @@ class GhostNetApp(MDApp):
 
 
 if __name__ == '__main__':
-    GhostNetApp().run()
+    try:
+        print("[GhostNet] Initializing GhostNetApp...")
+        GhostNetApp().run()
+        print("[GhostNet] GhostNetApp main loop exited cleanly.")
+    except BaseException as e:
+        import traceback
+        tb = traceback.format_exc()
+        try:
+            sys.__stderr__.write(f"[FATAL_STARTUP_CRASH] {tb}\n")
+            sys.__stderr__.flush()
+            sys.__stdout__.write(f"[FATAL_STARTUP_CRASH] {tb}\n")
+            sys.__stdout__.flush()
+        except Exception:
+            pass
+        for cdir in [
+            os.path.dirname(os.path.abspath(__file__)),
+            os.path.expanduser("~"),
+            "/data/user/0/org.ghostnet.ghostnet/files/app",
+            "."
+        ]:
+            try:
+                log_file = os.path.join(cdir, "startup-crash.log")
+                with open(log_file, "a") as f:
+                    f.write(f"\n--- FATAL RUNTIME CRASH {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n{tb}\n")
+                break
+            except Exception:
+                continue
+        raise

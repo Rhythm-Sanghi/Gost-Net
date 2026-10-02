@@ -37,3 +37,11 @@ cp buildozer-sideload.spec buildozer.spec
 
 echo "=== Starting Buildozer Debug Build for Track A ==="
 buildozer -v android debug 2>&1 | tee build_sideload.log
+
+echo "=== Ensuring _rust.abi3.so has libpython3.11.so in DT_NEEDED ==="
+find .buildozer/ -name "_rust.abi3.so" -exec patchelf --add-needed libpython3.11.so {} + || true
+
+echo "=== Copying Built APK to Workspace ==="
+mkdir -p "$WORKSPACE/bin"
+cp -v bin/*.apk "$WORKSPACE/bin/"
+
