@@ -26,12 +26,15 @@ jobs:
       run: |
         sudo apt-get update -qq
         sudo apt-get install -y --no-install-recommends \
+          build-essential \
           libgl1-mesa-dev \
           libgles2-mesa-dev \
           libsdl2-dev \
           libsdl2-image-dev \
           libsdl2-mixer-dev \
           libsdl2-ttf-dev \
+          libcairo2-dev \
+          pkg-config \
           python3-dev \
           xvfb
 
@@ -50,6 +53,7 @@ jobs:
         GOSTNET_TEST_MODE: "1"
         DISPLAY: ":99"
       run: |
+        set -o pipefail
         Xvfb :99 -screen 0 1024x768x24 &
         python -m pytest tests/ \
           --tb=short \
@@ -58,7 +62,6 @@ jobs:
           --timeout=120 \
           -x \
           2>&1 | tee test_output.txt
-        echo "Exit code: $?"
 
     - name: Upload test output
       if: always()
@@ -108,6 +111,7 @@ jobs:
           libtool-bin \
           libltdl-dev \
           pkg-config \
+          libcairo2-dev \
           zlib1g-dev \
           libncurses5-dev \
           libncursesw5-dev \
@@ -131,6 +135,7 @@ jobs:
 
     - name: Verify Rust toolchain
       run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
         rustup --version
         cargo --version
         rustup target list --installed | grep aarch64-linux-android
@@ -143,14 +148,12 @@ jobs:
     # ── Android SDK — use the pre-installed SDK on ubuntu-latest ──
     - name: Configure Android SDK
       run: |
-        # ubuntu-latest runners ship with Android SDK at $ANDROID_SDK_ROOT
-        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-        echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-        sudo chown -R runner:runner "$ANDROID_SDK_ROOT" || true
-        # Accept all SDK licences
-        yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses || true
-        # Install platform-33 and build-tools if not already present
-        "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+        SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+        echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> $GITHUB_ENV
+        echo "ANDROID_HOME=$SDK_ROOT" >> $GITHUB_ENV
+        sudo chown -R runner:runner "$SDK_ROOT" || true
+        yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_ROOT" --licenses || true
+        "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_ROOT" \
           "platforms;android-33" \
           "build-tools;33.0.2" || true
 
@@ -158,25 +161,31 @@ jobs:
       id: cache-ndk
       uses: actions/cache@v4
       with:
-        path: /opt/android-ndk-r25b
+        path: /home/runner/.buildozer/android/platform/android-ndk-r25b
         key: ${{ runner.os }}-ndk-r25b-25.1.8937393
 
     - name: Download Android NDK r25b
       if: steps.cache-ndk.outputs.cache-hit != 'true'
       run: |
-        wget --quiet -O /tmp/android-ndk-r25b-linux.zip \
-          https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
-        unzip -q /tmp/android-ndk-r25b-linux.zip -d /opt
-        mv /opt/android-ndk-r25b /opt/android-ndk-r25b
-        echo "NDK extracted to /opt/android-ndk-r25b"
+        mkdir -p "$HOME/.buildozer/android/platform"
+        if [ ! -d "$HOME/.buildozer/android/platform/android-ndk-r25b" ]; then
+          echo "Downloading Android NDK r25b..."
+          wget --quiet -O /tmp/android-ndk-r25b-linux.zip \
+            https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
+          unzip -q /tmp/android-ndk-r25b-linux.zip -d "$HOME/.buildozer/android/platform"
+          echo "NDK extracted successfully."
+        else
+          echo "NDK r25b already present."
+        fi
 
     - name: Set NDK environment variables
       run: |
-        echo "ANDROID_NDK_HOME=/opt/android-ndk-r25b" >> $GITHUB_ENV
-        echo "ANDROID_NDK_ROOT=/opt/android-ndk-r25b" >> $GITHUB_ENV
-        echo "ANDROID_NDK=/opt/android-ndk-r25b" >> $GITHUB_ENV
-        echo "ANDROIDNDK=/opt/android-ndk-r25b" >> $GITHUB_ENV
-        echo "ANDROIDSDK=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+        NDK_PATH="$HOME/.buildozer/android/platform/android-ndk-r25b"
+        echo "ANDROID_NDK_HOME=$NDK_PATH" >> $GITHUB_ENV
+        echo "ANDROID_NDK_ROOT=$NDK_PATH" >> $GITHUB_ENV
+        echo "ANDROID_NDK=$NDK_PATH" >> $GITHUB_ENV
+        echo "ANDROIDNDK=$NDK_PATH" >> $GITHUB_ENV
+        echo "ANDROIDSDK=/usr/local/lib/android/sdk" >> $GITHUB_ENV
         echo "ANDROIDAPI=33" >> $GITHUB_ENV
         echo "ANDROIDMINAPI=21" >> $GITHUB_ENV
 
@@ -241,12 +250,25 @@ jobs:
     - name: Build debug APK (Track A)
       if: steps.check_secrets.outputs.has_secrets == 'false'
       env:
+        CARGO_HOME: /home/runner/.cargo
+        RUSTUP_HOME: /home/runner/.rustup
+        ANDROIDSDK: /usr/local/lib/android/sdk
+        ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+        ANDROID_HOME: /usr/local/lib/android/sdk
+        ANDROIDNDK: /home/runner/.buildozer/android/platform/android-ndk-r25b
+        ANDROID_NDK_HOME: /home/runner/.buildozer/android/platform/android-ndk-r25b
+        ANDROID_NDK_ROOT: /home/runner/.buildozer/android/platform/android-ndk-r25b
+        ANDROIDAPI: 33
+        ANDROIDMINAPI: 21
         MAKEFLAGS: -j2
         CCACHE_DIR: /home/runner/.ccache
         CCACHE_MAXSIZE: 1G
       run: |
-        buildozer -v android debug > buildozer.log 2>&1 || \
-          (tail -n 2000 buildozer.log && exit 1)
+        set -o pipefail
+        export PATH="$HOME/.cargo/bin:$PATH"
+        rustup --version
+        cargo --version
+        buildozer -v android debug 2>&1 | tee buildozer.log
 
     - name: Build release APK (Track A, signed)
       if: steps.check_secrets.outputs.has_secrets == 'true'
@@ -254,26 +276,39 @@ jobs:
         KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        CARGO_HOME: /home/runner/.cargo
+        RUSTUP_HOME: /home/runner/.rustup
+        ANDROIDSDK: /usr/local/lib/android/sdk
+        ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+        ANDROID_HOME: /usr/local/lib/android/sdk
+        ANDROIDNDK: /home/runner/.buildozer/android/platform/android-ndk-r25b
+        ANDROID_NDK_HOME: /home/runner/.buildozer/android/platform/android-ndk-r25b
+        ANDROID_NDK_ROOT: /home/runner/.buildozer/android/platform/android-ndk-r25b
+        ANDROIDAPI: 33
+        ANDROIDMINAPI: 21
         MAKEFLAGS: -j2
         CCACHE_DIR: /home/runner/.ccache
         CCACHE_MAXSIZE: 1G
       run: |
-        buildozer -v android release > buildozer.log 2>&1 || \
-          (tail -n 2000 buildozer.log && exit 1)
+        set -o pipefail
+        export PATH="$HOME/.cargo/bin:$PATH"
+        rustup --version
+        cargo --version
+        buildozer -v android release 2>&1 | tee buildozer.log
 
     - name: Sign release APK
       if: steps.check_secrets.outputs.has_secrets == 'true'
       run: |
         APK_PATH=$(find bin -name "*.apk" -type f | head -n 1)
         SIGNED_APK_PATH="${APK_PATH%-unsigned.apk}-signed.apk"
-        $ANDROID_SDK_ROOT/build-tools/33.0.2/apksigner sign \
+        /usr/local/lib/android/sdk/build-tools/33.0.2/apksigner sign \
           --ks ghostnet.keystore \
           --ks-pass pass:"${{ secrets.KEYSTORE_PASSWORD }}" \
           --key-pass pass:"${{ secrets.KEY_PASSWORD }}" \
           --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
           --out "$SIGNED_APK_PATH" \
           "$APK_PATH"
-        $ANDROID_SDK_ROOT/build-tools/33.0.2/apksigner verify "$SIGNED_APK_PATH"
+        /usr/local/lib/android/sdk/build-tools/33.0.2/apksigner verify "$SIGNED_APK_PATH"
         echo "Signed APK: $SIGNED_APK_PATH"
 
     - name: Locate APK
