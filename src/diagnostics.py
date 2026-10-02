@@ -1,5 +1,8 @@
 import socket
-import psutil
+try:
+    import psutil
+except ImportError:
+    psutil = None
 import threading
 import time
 from typing import Dict, List, Optional, Tuple
@@ -60,7 +63,17 @@ class NetworkDiagnostics:
     def _update_routing_table(self):
         try:
             routes = {}
-            if self.engine_ref and hasattr(self.engine_ref, 'routing_manager'):
+            if self.engine_ref and hasattr(self.engine_ref, 'routing_table') and self.engine_ref.routing_table:
+                rt = self.engine_ref.routing_table
+                for dest_id, entry in rt.get_all_routes().items():
+                    routes[dest_id] = {
+                        'next_hop': entry.next_hop_id,
+                        'metric': entry.metric,
+                        'rtt_ms': getattr(entry, 'rtt_ms', 0.0),
+                        'pdr': getattr(entry, 'pdr', 1.0),
+                        'status': getattr(entry, 'route_status', 'ACTIVE')
+                    }
+            elif self.engine_ref and hasattr(self.engine_ref, 'routing_manager'):
                 routing_mgr = self.engine_ref.routing_manager
                 if hasattr(routing_mgr, 'routing_table'):
                     for dest_id, route_info in routing_mgr.routing_table.items():
@@ -78,22 +91,24 @@ class NetworkDiagnostics:
         except Exception as e:
             self.routing_table = {'error': str(e)}
 
+
     def _update_active_sockets(self):
         try:
             sockets = []
-            try:
-                connections = psutil.net_connections()
-                for conn in connections:
-                    if conn.status == 'ESTABLISHED':
-                        socket_info = {
-                            'local': f"{conn.laddr.ip}:{conn.laddr.port}" if conn.laddr else 'N/A',
-                            'remote': f"{conn.raddr.ip}:{conn.raddr.port}" if conn.raddr else 'N/A',
-                            'type': conn.type.name if hasattr(conn.type, 'name') else str(conn.type),
-                            'status': conn.status
-                        }
-                        sockets.append(socket_info)
-            except:
-                pass
+            if psutil:
+                try:
+                    connections = psutil.net_connections()
+                    for conn in connections:
+                        if conn.status == 'ESTABLISHED':
+                            socket_info = {
+                                'local': f"{conn.laddr.ip}:{conn.laddr.port}" if conn.laddr else 'N/A',
+                                'remote': f"{conn.raddr.ip}:{conn.raddr.port}" if conn.raddr else 'N/A',
+                                'type': conn.type.name if hasattr(conn.type, 'name') else str(conn.type),
+                                'status': conn.status
+                            }
+                            sockets.append(socket_info)
+                except Exception:
+                    pass
 
             if self.engine_ref and hasattr(self.engine_ref, 'p2p_manager'):
                 p2p_mgr = self.engine_ref.p2p_manager

@@ -3,8 +3,8 @@
 
 # Core Framework
 kivy==2.3.0
-# Latest stable KivyMD (master branch used in buildozer for 2.0 API support)
-kivymd==1.2.0
+# Latest stable KivyMD (2.0+ for MDButton and Material Design 3)
+kivymd>=2.0.0,<3.0.0
 # Required by KivyMD 2.0+ for async support in Material Design 3 animations
 asynckivy
 asyncgui
@@ -12,17 +12,20 @@ asyncgui
 materialyoucolor
 
 # Cryptography
-cryptography>=41.0.0
+cryptography>=41.0.0,<51.0.0
 
 # Network utilities (for multi-interface detection)
-netifaces>=0.11.0
+netifaces>=0.11.0,<1.0.0
+
+# Diagnostics & System Metrics
+psutil>=5.9.0,<8.0.0
 
 # Image processing (required by Kivy)
-pillow>=10.0.0
+pillow>=10.0.0,<14.0.0
 
 # GIS & Mapping (for offline tactical map visualization)
 kivy_garden.mapview
 
-# Development/Testing (optional)
-# pytest>=7.4.0
-# pytest-asyncio>=0.21.0
+# Automated Testing
+pytest>=7.4.0,<10.0.0
+pytest-asyncio>=0.21.0,<2.0.0

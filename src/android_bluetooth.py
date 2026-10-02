@@ -36,6 +36,14 @@ try:
     PYJNIUS_AVAILABLE = True
 except ImportError:
     PYJNIUS_AVAILABLE = False
+    autoclass = None
+    cast = None
+    class PythonJavaClass:
+        pass
+    def java_method(signature):
+        def decorator(f):
+            return f
+        return decorator
     logger.warning("[Bluetooth] pyjnius not available - Bluetooth disabled")
 
 

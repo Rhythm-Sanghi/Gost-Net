@@ -74,7 +74,7 @@ def decrypt_telemetry_file(file_path):
         return plaintext.decode('utf-8')
     except Exception as e:
         print(f"Decryption error: {e}")
-        sys.exit(1)
+        raise RuntimeError(f"Decryption error: {e}")
 
 
 def parse_csv_data(csv_text):
@@ -196,6 +196,17 @@ def analyze_telemetry(rows):
         print("No relay events found")
     
     print("\n" + "="*70 + "\n")
+    
+    return {
+        "total_events": total_events,
+        "duration_seconds": mission_duration.total_seconds(),
+        "failure_rate": failure_rate,
+        "relay_events": relay_events,
+        "route_discovered": route_discovered,
+        "route_dropped": route_dropped,
+        "stability_ratio": stability_ratio,
+        "most_active_relay": most_active_relay[0] if most_active_relay else None,
+    }
 
 
 def main():
@@ -206,9 +217,13 @@ def main():
     
     file_path = sys.argv[1]
     
-    csv_text = decrypt_telemetry_file(file_path)
-    rows = parse_csv_data(csv_text)
-    analyze_telemetry(rows)
+    try:
+        csv_text = decrypt_telemetry_file(file_path)
+        rows = parse_csv_data(csv_text)
+        analyze_telemetry(rows)
+    except Exception as e:
+        print(f"Analysis failed: {e}")
+        sys.exit(1)
 
 
 if __name__ == '__main__':

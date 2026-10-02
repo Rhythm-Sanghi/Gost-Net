@@ -12,6 +12,8 @@ Architecture:
 - Thread-safe with Kivy Clock integration for UI updates
 """
 
+import os
+import sys
 import logging
 import threading
 import time
@@ -20,6 +22,10 @@ from enum import Enum
 from dataclasses import dataclass, field
 import socket
 import json
+
+_src_dir = os.path.dirname(os.path.abspath(__file__))
+if _src_dir not in sys.path:
+    sys.path.insert(0, _src_dir)
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)

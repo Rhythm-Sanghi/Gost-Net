@@ -13,6 +13,7 @@ import json
 import base64
 import hmac
 import hashlib
+import time
 
 class DoubleRatchetSession:
     def __init__(self, peer_id, shared_secret=None, is_initiator=False):
@@ -250,6 +251,7 @@ class CryptoManager:
         self.signing_public_key = None
         self.peer_keys: Dict[str, bytes] = {}
         self.peer_aes_keys: Dict[str, bytes] = {}
+        self.peer_signing_keys: Dict[str, bytes] = {}
         self.keys_lock = threading.Lock()
         self._initialize_keys(signing_private_key_bytes)
 
@@ -319,6 +321,75 @@ class CryptoManager:
         mlock_bytes(peer_public_key_bytes)
         with self.keys_lock:
             self.peer_keys[peer_id] = peer_public_key_bytes
+
+    def set_peer_signing_key(self, peer_id: str, peer_signing_key_bytes: bytes):
+        """Store the Ed25519 signing public key for a peer."""
+        mlock_bytes(peer_signing_key_bytes)
+        with self.keys_lock:
+            self.peer_signing_keys[peer_id] = peer_signing_key_bytes
+
+    def check_and_set_peer_signing_key(self, peer_id: str, peer_signing_key_bytes: bytes) -> tuple:
+        """
+        Check incoming Ed25519 signing key against existing peer key.
+        Returns:
+            (True, "NEW_KEY") - First time seeing this peer; registered under TOFU.
+            (True, "MATCH") - Key matches established key.
+            (False, "KEY_CHANGED") - Key differs! Potential MITM or reinstallation. Not overwritten.
+        """
+        if not peer_signing_key_bytes or not isinstance(peer_signing_key_bytes, bytes):
+            return False, "INVALID_KEY"
+
+        with self.keys_lock:
+            existing = self.peer_signing_keys.get(peer_id)
+            if existing is None:
+                mlock_bytes(peer_signing_key_bytes)
+                self.peer_signing_keys[peer_id] = peer_signing_key_bytes
+                return True, "NEW_KEY"
+            elif existing == peer_signing_key_bytes:
+                return True, "MATCH"
+            else:
+                return False, "KEY_CHANGED"
+
+    def force_update_peer_signing_key(self, peer_id: str, peer_signing_key_bytes: bytes):
+        """Explicit operator override to accept and trust a changed key."""
+        mlock_bytes(peer_signing_key_bytes)
+        with self.keys_lock:
+            self.peer_signing_keys[peer_id] = peer_signing_key_bytes
+
+    def get_peer_signing_key(self, peer_id: str) -> Optional[bytes]:
+        """Get the Ed25519 signing public key for a peer."""
+        with self.keys_lock:
+            return self.peer_signing_keys.get(peer_id)
+
+    def compute_key_fingerprint(self, key_bytes: bytes) -> str:
+        """Calculate uppercase colon-separated SHA-256 fingerprint for a public key."""
+        if not key_bytes or not isinstance(key_bytes, bytes):
+            return "UNKNOWN"
+        digest = hashlib.sha256(key_bytes).hexdigest().upper()
+        return ":".join(digest[i:i+2] for i in range(0, min(32, len(digest)), 2))
+
+    def compute_safety_number(self, peer_signing_key_bytes: bytes) -> str:
+        """
+        Compute a deterministic 12-digit safety number between local node and a peer.
+        Sorted lexicographically so both parties compute the identical safety number.
+        Format: XXXX-XXXX-XXXX
+        """
+        if not peer_signing_key_bytes or not isinstance(peer_signing_key_bytes, bytes):
+            return "0000-0000-0000"
+        local_key = self.get_signing_public_key_bytes()
+        sorted_keys = sorted([local_key, peer_signing_key_bytes])
+        combined = b"ghostnet_safety_number_v1:" + sorted_keys[0] + sorted_keys[1]
+        digest = hashlib.sha512(combined).digest()
+        num = int.from_bytes(digest[:16], 'big') % (10**12)
+        num_str = f"{num:012d}"
+        return f"{num_str[:4]}-{num_str[4:8]}-{num_str[8:12]}"
+
+    def get_peer_safety_number(self, peer_id: str) -> str:
+        """Get the 12-digit safety number for a peer if their signing key is known."""
+        peer_key = self.get_peer_signing_key(peer_id)
+        if peer_key:
+            return self.compute_safety_number(peer_key)
+        return "0000-0000-0000"
 
     def derive_shared_secret(self, peer_id: str) -> Optional[bytes]:
         self._check_daily_key_rotation()
@@ -491,6 +562,78 @@ class CryptoManager:
             except Exception as e:
                 print(f"[CryptoManager] Error shredding keys: {e}")
 
+    def zeroize_ephemeral_keys(self):
+        """
+        Rapidly overwrite all ephemeral in-memory session keys, derived AES keys,
+        and DH shared secrets with zeroes to mitigate cold-boot or memory inspection.
+        """
+        with self.keys_lock:
+            try:
+                for peer_id in list(self.peer_aes_keys.keys()):
+                    shred_bytes(self.peer_aes_keys[peer_id])
+                    del self.peer_aes_keys[peer_id]
+                for peer_id in list(self.peer_keys.keys()):
+                    shred_bytes(self.peer_keys[peer_id])
+                    del self.peer_keys[peer_id]
+                print("[CryptoManager] Ephemeral keys zeroized successfully")
+            except Exception as e:
+                print(f"[CryptoManager] Error during key zeroization: {e}")
+
+def create_revocation_token(peer_id: str, reason: str, signing_private_key: ed25519.Ed25519PrivateKey) -> dict:
+    """
+    Generate a signed revocation token to quarantine a compromised node.
+    """
+    revoked_at = time.time()
+    payload = {
+        "peer_id": peer_id,
+        "reason": reason,
+        "revoked_at": revoked_at
+    }
+    data_to_sign = json.dumps(payload, sort_keys=True).encode('utf-8')
+    sig = signing_private_key.sign(data_to_sign)
+    pubkey_bytes = signing_private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw
+    )
+    return {
+        "peer_id": peer_id,
+        "reason": reason,
+        "revoked_at": revoked_at,
+        "signature": base64.b64encode(sig).decode('utf-8'),
+        "signing_pubkey": base64.b64encode(pubkey_bytes).decode('utf-8')
+    }
+
+def verify_revocation_token(token: dict, trusted_pubkey_bytes: Optional[bytes] = None) -> bool:
+    """
+    Verify the Ed25519 digital signature of a revocation token.
+    """
+    try:
+        sig_b64 = token.get("signature")
+        if not sig_b64:
+            return False
+        sig = base64.b64decode(sig_b64)
+        
+        pubkey_bytes = trusted_pubkey_bytes
+        if not pubkey_bytes:
+            pubkey_b64 = token.get("signing_pubkey")
+            if not pubkey_b64:
+                return False
+            pubkey_bytes = base64.b64decode(pubkey_b64)
+            
+        verify_payload = {
+            "peer_id": token["peer_id"],
+            "reason": token["reason"],
+            "revoked_at": token["revoked_at"]
+        }
+        data_to_verify = json.dumps(verify_payload, sort_keys=True).encode('utf-8')
+        
+        pub_key = ed25519.Ed25519PublicKey.from_public_bytes(pubkey_bytes)
+        pub_key.verify(sig, data_to_verify)
+        return True
+    except Exception as e:
+        print(f"[Security] Revocation verification failed: {e}")
+        return False
+
 def shred_bytes(b: bytes):
     if not isinstance(b, bytes):
         return
@@ -571,3 +714,56 @@ def shred_file(filepath: str):
             os.remove(filepath)
         except:
             pass
+
+
+def derive_channel_key(channel_id: str, passphrase: str, salt: bytes) -> bytes:
+    """
+    Derive a 256-bit symmetric channel key using HKDF over PBKDF2 stretched passphrase.
+    """
+    import hashlib
+    stretched = hashlib.pbkdf2_hmac(
+        'sha256',
+        passphrase.encode('utf-8'),
+        salt,
+        iterations=50000,
+        dklen=32
+    )
+    hkdf = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        info=f"ghostnet_channel_{channel_id}".encode('utf-8'),
+        backend=default_backend()
+    )
+    return hkdf.derive(stretched)
+
+
+def encrypt_channel_message(channel_key: bytes, plaintext: str) -> str:
+    """
+    Encrypt plaintext string using AES-256-GCM under the channel key.
+    Returns base64 string formatted as: {nonce_12B}{ciphertext_and_tag}
+    """
+    aesgcm = AESGCM(channel_key)
+    nonce = os.urandom(12)
+    ct = aesgcm.encrypt(nonce, plaintext.encode('utf-8'), None)
+    return base64.b64encode(nonce + ct).decode('utf-8')
+
+
+def decrypt_channel_message(channel_key: bytes, ciphertext_b64: str) -> Optional[str]:
+    """
+    Decrypt a base64-encoded channel message using AES-256-GCM.
+    Returns decrypted plaintext or None if authentication fails.
+    """
+    try:
+        raw = base64.b64decode(ciphertext_b64)
+        if len(raw) < 28:
+            return None
+        nonce = raw[:12]
+        ct = raw[12:]
+        aesgcm = AESGCM(channel_key)
+        pt = aesgcm.decrypt(nonce, ct, None)
+        return pt.decode('utf-8')
+    except Exception as e:
+        print(f"[Security] Channel message decryption failed: {e}")
+        return None
+

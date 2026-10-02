@@ -20,7 +20,14 @@ class TelemetryLogger:
         self.cipher = None
         
         if data_dir is None:
-            if _platform_check.system() == 'Android':
+            is_android = False
+            try:
+                from kivy.utils import platform as _kivy_platform
+                is_android = (_kivy_platform == 'android')
+            except ImportError:
+                is_android = (_platform_check.system() == 'Android')
+
+            if is_android:
                 try:
                     from android.storage import app_storage_path
                     base_dir = app_storage_path()
@@ -69,7 +76,7 @@ class TelemetryLogger:
                 import csv
                 import base64
                 
-                write_header = not os.path.exists(self.csv_path)
+                write_header = not os.path.exists(self.csv_path) or os.path.getsize(self.csv_path) == 0
                 
                 with open(self.csv_path, 'ab') as f:
                     if write_header:
@@ -98,6 +105,10 @@ class TelemetryLogger:
             except Exception as e:
                 print(f"[TelemetryLogger] Error flushing buffer: {e}")
     
+    def record_metric(self, name: str, value: str = '', status: str = ''):
+        """Convenience method to record a named metric or telemetry event."""
+        self.log_event(event_type=name, metric=str(value), status=status)
+
     def flush(self):
         with self.buffer_lock:
             self._flush_buffer()
@@ -126,7 +137,10 @@ class TelemetryLogger:
             try:
                 self.buffer.clear()
                 if os.path.exists(self.csv_path):
-                    from security import shred_file
+                    try:
+                        from security import shred_file
+                    except ImportError:
+                        from src.security import shred_file
                     shred_file(self.csv_path)
                 self.init_csv()
             except Exception as e:

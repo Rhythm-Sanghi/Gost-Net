@@ -89,12 +89,25 @@ class AudioManager:
     
     def _start_recording_desktop(self):
         try:
-            dummy_file = self.current_recording_path
-            with open(dummy_file, 'wb') as f:
-                f.write(b'MOCK_AUDIO_DATA')
+            target_file = self.current_recording_path
+            # Write a valid standard WAV RIFF container so media players recognize it
+            import wave
+            import struct
+            try:
+                # Generate 1.5 seconds of sample audio buffer
+                with wave.open(target_file, 'wb') as wf:
+                    wf.setnchannels(1)        # Mono
+                    wf.setsampwidth(2)        # 16-bit
+                    wf.setframerate(8000)      # 8 kHz speech bandwidth
+                    samples = int(8000 * 1.5)
+                    data = struct.pack('<' + ('h' * samples), *([0] * samples))
+                    wf.writeframes(data)
+            except Exception:
+                with open(target_file, 'wb') as f:
+                    f.write(b'RIFF$\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x40\x1f\x00\x00\x80>\x00\x00\x02\x00\x10\x00data\x00\x00\x00\x00')
             
             self.is_recording = True
-            print(f"[AudioManager] Mock recording started: {dummy_file}")
+            print(f"[AudioManager] Desktop recording initialized: {target_file}")
             return True
         
         except Exception as e:
@@ -218,10 +231,60 @@ class AudioManager:
         
         threading.Thread(target=monitor_worker, daemon=True).start()
     
+    def get_audio_duration(self, file_path: str) -> float:
+        """Calculate duration of an audio file in seconds, with fallbacks."""
+        if not file_path or not os.path.exists(file_path):
+            return 0.0
+        try:
+            import wave
+            with wave.open(file_path, 'rb') as wf:
+                frames = wf.getnframes()
+                rate = wf.getframerate()
+                if rate > 0:
+                    return float(frames) / float(rate)
+        except Exception:
+            pass
+        try:
+            size = os.path.getsize(file_path)
+            return max(1.0, size / 16000.0)
+        except Exception:
+            return 1.0
+
     def _play_audio_desktop(self, file_path=None):
         self.is_playing = True
-        print("[AudioManager] Mock playback started")
-        
+        sound_instance = None
+        if file_path and os.path.exists(file_path):
+            try:
+                from kivy.core.audio import SoundLoader
+                sound_instance = SoundLoader.load(file_path)
+            except Exception as e:
+                print(f"[AudioManager] SoundLoader load error: {e}")
+                sound_instance = None
+                
+        if sound_instance:
+            self.sound = sound_instance
+            try:
+                self.sound.play()
+                duration = self.sound.length if self.sound.length > 0 else self.get_audio_duration(file_path)
+                
+                def track_sound():
+                    start_t = time.time()
+                    while self.is_playing and getattr(self, 'sound', None) and self.sound.state == 'play':
+                        elapsed = time.time() - start_t
+                        pct = min(100.0, (elapsed / duration) * 100.0) if duration > 0 else 50.0
+                        if self.on_playback_progress:
+                            Clock.schedule_once(lambda dt, p=pct: self.on_playback_progress(p), 0)
+                        time.sleep(0.1)
+                    if self.is_playing:
+                        self.is_playing = False
+                        if self.on_playback_complete:
+                            Clock.schedule_once(lambda dt: self.on_playback_complete(), 0)
+                            
+                threading.Thread(target=track_sound, daemon=True).start()
+                return True
+            except Exception as e:
+                print(f"[AudioManager] Error playing sound with SoundLoader: {e}")
+
         def mock_playback():
             for i in range(101):
                 if not self.is_playing:
@@ -256,6 +319,14 @@ class AudioManager:
                     del self.player
             except Exception as e:
                 print(f"[AudioManager] Android stop playback error: {e}")
+        else:
+            if hasattr(self, 'sound') and self.sound:
+                try:
+                    self.sound.stop()
+                    self.sound.unload()
+                except Exception:
+                    pass
+                self.sound = None
         
         self.is_playing = False
         print("[AudioManager] Playback stopped")
@@ -268,7 +339,10 @@ class AudioManager:
         
         if recording_path and os.path.exists(recording_path):
             try:
-                from security import shred_file
+                try:
+                    from src.security import shred_file
+                except ImportError:
+                    from security import shred_file
                 shred_file(recording_path)
                 print(f"[AudioManager] Recording cancelled and shredded: {recording_path}")
             except Exception as e:
@@ -283,7 +357,10 @@ class AudioManager:
     
     def shred_cache(self):
         try:
-            from security import shred_file
+            try:
+                from src.security import shred_file
+            except ImportError:
+                from security import shred_file
             if os.path.exists(self.recording_dir):
                 for filename in os.listdir(self.recording_dir):
                     if filename.endswith('.m4a'):
@@ -308,3 +385,8 @@ def get_audio_manager():
     if _audio_manager_instance is None:
         _audio_manager_instance = AudioManager()
     return _audio_manager_instance
+
+
+def get_audio_duration(file_path: str) -> float:
+    return get_audio_manager().get_audio_duration(file_path)
+

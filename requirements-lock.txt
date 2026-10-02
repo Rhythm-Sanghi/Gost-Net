@@ -1,0 +1,38 @@
+# Gost-Net - Production Frozen Lockfile
+# Generated from clean Python 3.11 virtual environment validation
+# Target: Windows x64 & Linux / Android arm64-v8a
+
+asyncgui==0.6.3
+asynckivy==0.6.4
+certifi==2026.7.22
+cffi==2.1.1
+charset-normalizer==3.5.2
+colorama==0.4.6
+cryptography==50.0.2
+docutils==0.23
+idna==3.20
+iniconfig==2.3.0
+Kivy==2.3.0
+kivy-deps.angle==0.4.0
+kivy-deps.glew==0.3.1
+kivy-deps.sdl2==0.7.0
+Kivy-Garden==0.1.5
+kivy-garden.mapview==1.0.6
+kivymd==2.0.0
+materialshapes==0.3
+materialyoucolor==3.0.4
+netifaces==0.11.0
+packaging==26.3
+pillow==12.3.0
+pluggy==1.6.0
+psutil==7.2.2
+pycairo==1.29.1
+pycparser==3.0
+Pygments==2.21.0
+pypiwin32==223
+pytest==9.1.1
+pytest-asyncio==1.4.0
+pywin32==312
+requests==2.34.2
+typing_extensions==4.16.0
+urllib3==2.8.0

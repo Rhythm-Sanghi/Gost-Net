@@ -21,6 +21,7 @@ class _OpsecLogger:
         self.original_stderr = sys.stderr
         self.dev_null = _DevNullWriter()
         self.production_mode = False
+        self._devnull_file = None
 
     def activate_production_mode(self):
         global PRODUCTION_MODE
@@ -31,9 +32,9 @@ class _OpsecLogger:
         
         try:
             import os
-            devnull = open(os.devnull, 'w')
-            sys.stdout = devnull
-            sys.stderr = devnull
+            self._devnull_file = open(os.devnull, 'w')
+            sys.stdout = self._devnull_file
+            sys.stderr = self._devnull_file
         except:
             sys.stdout = self.dev_null
             sys.stderr = self.dev_null
@@ -44,6 +45,12 @@ class _OpsecLogger:
         self.production_mode = False
         sys.stdout = self.original_stdout
         sys.stderr = self.original_stderr
+        if self._devnull_file:
+            try:
+                self._devnull_file.close()
+            except:
+                pass
+            self._devnull_file = None
 
     def is_production(self) -> bool:
         return self.production_mode

@@ -59,9 +59,6 @@ class NetworkDetector:
         interfaces = {}
         
         try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.settimeout(2.0)
-            
             dns_servers = [
                 ('1.1.1.1', 80),
                 ('8.8.8.8', 80),
@@ -70,6 +67,8 @@ class NetworkDetector:
             
             for dns_ip, port in dns_servers:
                 try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    s.settimeout(2.0)
                     s.connect((dns_ip, port))
                     ip = s.getsockname()[0]
                     s.close()
@@ -84,9 +83,11 @@ class NetworkDetector:
                     }
                     return interfaces
                 except (OSError, socket.error):
+                    try:
+                        s.close()
+                    except Exception:
+                        pass
                     continue
-            
-            s.close()
         
         except Exception as e:
             print(f"[NetworkDetector] Fallback detection error: {e}")

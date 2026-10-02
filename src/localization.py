@@ -37,7 +37,12 @@ class LocalizationManager:
         Args:
             locale_dir: Directory containing translation JSON files
         """
-        self.locale_dir = Path(locale_dir)
+        path = Path(locale_dir)
+        if not path.exists():
+            pkg_path = Path(__file__).resolve().parent.parent / "assets" / "locales"
+            if pkg_path.exists():
+                path = pkg_path
+        self.locale_dir = path
         self.current_language = 'en'
         self.fallback_language = 'en'
         self.translations: Dict[str, Dict[str, str]] = {}
@@ -160,6 +165,8 @@ class LocalizationManager:
         # Return key if not found
         print(f"[Localization] Missing translation key: {key}")
         return key
+    
+    get_text = translate
     
     def reload(self):
         """Reload all translation files."""

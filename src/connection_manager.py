@@ -1,8 +1,15 @@
+import os
+import sys
 import threading
 import time
 import socket
 from typing import Dict, Optional, Callable
 from enum import Enum
+
+_src_dir = os.path.dirname(os.path.abspath(__file__))
+if _src_dir not in sys.path:
+    sys.path.insert(0, _src_dir)
+
 from android_mocks import is_android, get_android_wifi_direct, get_android_bluetooth
 
 try:
@@ -86,6 +93,7 @@ class P2PConnection:
                 return False
 
             self.crypto_manager.set_peer_public_key(self.peer_id, peer_pub_key)
+            self.crypto_manager.set_peer_signing_key(self.peer_id, peer_signing_key)
 
             # TOFU check against the database
             import base64

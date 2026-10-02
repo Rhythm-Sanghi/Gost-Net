@@ -1,10 +1,15 @@
 import sqlite3
 import os
+import sys
 import time
 import threading
 from datetime import datetime
 from typing import List, Dict, Optional
 from cryptography.fernet import Fernet
+
+_src_dir = os.path.dirname(os.path.abspath(__file__))
+if _src_dir not in sys.path:
+    sys.path.insert(0, _src_dir)
 
 
 class PersistenceDatabase:
@@ -17,6 +22,10 @@ class PersistenceDatabase:
         self.ephemeral_messages = []
         self.cipher = Fernet(decrypted_key) if decrypted_key else None
         
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
+
         try:
             self._initialize_database()
         except Exception as e:
@@ -32,6 +41,10 @@ class PersistenceDatabase:
         except Exception as e:
             print(f"[PersistenceDatabase] Warning setting PRAGMAs: {e}")
         return conn
+    
+    def close(self):
+        """Cleanly releases any cached handles or connections."""
+        pass
     
     def _initialize_database(self):
         with self.db_lock:
@@ -78,8 +91,60 @@ class PersistenceDatabase:
                         session_data TEXT NOT NULL
                     )
                 ''')
+
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS waypoints (
+                        waypoint_id TEXT PRIMARY KEY,
+                        title TEXT NOT NULL,
+                        description TEXT,
+                        waypoint_type TEXT NOT NULL,
+                        latitude REAL NOT NULL,
+                        longitude REAL NOT NULL,
+                        altitude REAL DEFAULT 0.0,
+                        created_by TEXT NOT NULL,
+                        created_at REAL NOT NULL,
+                        expires_at REAL
+                    )
+                ''')
+
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS revoked_peers (
+                        peer_id TEXT PRIMARY KEY,
+                        reason TEXT NOT NULL,
+                        revoked_at REAL NOT NULL,
+                        signature TEXT
+                    )
+                ''')
+
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS group_channels (
+                        channel_id TEXT PRIMARY KEY,
+                        channel_name TEXT NOT NULL,
+                        passphrase_salt TEXT NOT NULL,
+                        created_at REAL NOT NULL,
+                        is_active INTEGER DEFAULT 1
+                    )
+                ''')
+
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS group_messages (
+                        message_id TEXT PRIMARY KEY,
+                        channel_id TEXT NOT NULL,
+                        sender_id TEXT NOT NULL,
+                        sender_name TEXT NOT NULL,
+                        content TEXT NOT NULL,
+                        timestamp REAL NOT NULL,
+                        is_read INTEGER DEFAULT 0
+                    )
+                ''')
+
+                cursor.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_group_messages_channel_time
+                    ON group_messages(channel_id, timestamp)
+                ''')
                 
                 conn.commit()
+
                 
                 self._migrate_add_expires_at_column(conn, cursor)
                 self._migrate_add_signing_key_columns(conn, cursor)
@@ -181,6 +246,35 @@ class PersistenceDatabase:
                         conn.close()
                     except:
                         pass
+
+    def set_peer_verified(self, peer_id: str, is_verified: bool = True) -> bool:
+        """Mark a peer's identity key as verified or unverified out-of-band."""
+        conn = None
+        with self.db_lock:
+            try:
+                conn = self._connect()
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE peers SET is_verified = ? WHERE peer_id = ?
+                ''', (1 if is_verified else 0, peer_id))
+                conn.commit()
+                return True
+            except Exception as e:
+                print(f"[PersistenceDatabase] Error setting peer verification for {peer_id}: {e}")
+                return False
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+
+    def is_peer_verified(self, peer_id: str) -> bool:
+        """Check whether a peer's identity key has been verified out-of-band."""
+        peer = self.get_peer(peer_id)
+        if peer:
+            return bool(peer.get('is_verified', 0))
+        return False
     
     def save_peer(self, peer_id: str, device_name: str, mac_address: Optional[str] = None,
                   discovery_type: Optional[str] = None, last_seen: Optional[float] = None) -> bool:
@@ -304,6 +398,8 @@ class PersistenceDatabase:
     def get_messages_for_peer(self, peer_id: str, limit: int = 100) -> List[Dict]:
         if self.ephemeral_mode:
             with self.db_lock:
+                now = time.time()
+                self.ephemeral_messages = [m for m in self.ephemeral_messages if not (m.get('expires_at') and m['expires_at'] < now)]
                 msgs = [m for m in self.ephemeral_messages if m['peer_id'] == peer_id]
                 msgs = sorted(msgs, key=lambda x: x['timestamp'])[-limit:]
                 return msgs
@@ -450,7 +546,10 @@ class PersistenceDatabase:
                                 file_path = content.decode('utf-8') if isinstance(content, bytes) else content
                             
                             if file_path and os.path.isfile(file_path):
-                                from security import shred_file
+                                try:
+                                    from src.security import shred_file
+                                except ImportError:
+                                    from security import shred_file
                                 shred_file(file_path)
                                 print(f"[PersistenceDatabase] Shredded file: {file_path}")
                         except Exception as e:
@@ -460,6 +559,26 @@ class PersistenceDatabase:
                 conn.commit()
                 
                 deleted_count = cursor.rowcount
+
+                # Also scrub in-memory ephemeral messages
+                now = current_time
+                initial_ephem = len(self.ephemeral_messages)
+                valid_ephem = []
+                for m in self.ephemeral_messages:
+                    if m.get('expires_at') and m['expires_at'] < now:
+                        if m.get('content_type') == 'file':
+                            f_path = m.get('content')
+                            if f_path and os.path.isfile(f_path):
+                                try:
+                                    from security import shred_file
+                                    shred_file(f_path)
+                                except Exception:
+                                    pass
+                    else:
+                        valid_ephem.append(m)
+                self.ephemeral_messages = valid_ephem
+                deleted_count += (initial_ephem - len(self.ephemeral_messages))
+
                 if deleted_count > 0:
                     print(f"[PersistenceDatabase] Scrubbed {deleted_count} expired messages")
                 return deleted_count
@@ -478,7 +597,10 @@ class PersistenceDatabase:
         self.ephemeral_messages.clear()
         with self.db_lock:
             try:
-                from security import shred_file
+                try:
+                    from src.security import shred_file
+                except ImportError:
+                    from security import shred_file
                 shred_file(self.db_path)
                 print("[PersistenceDatabase] Database file securely shredded and deleted")
                 return True
@@ -604,3 +726,338 @@ class PersistenceDatabase:
                         conn.close()
                     except:
                         pass
+
+    def save_waypoint(self, waypoint_id: str, title: str, description: str,
+                      waypoint_type: str, latitude: float, longitude: float,
+                      altitude: float = 0.0, created_by: str = 'unknown',
+                      created_at: Optional[float] = None,
+                      expires_at: Optional[float] = None) -> bool:
+        if created_at is None:
+            created_at = time.time()
+        conn = None
+        with self.db_lock:
+            try:
+                conn = self._connect()
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT OR REPLACE INTO waypoints
+                    (waypoint_id, title, description, waypoint_type, latitude, longitude, altitude, created_by, created_at, expires_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (waypoint_id, title, description, waypoint_type, latitude, longitude, altitude, created_by, created_at, expires_at))
+                conn.commit()
+                return True
+            except Exception as e:
+                print(f"[PersistenceDatabase] Error saving waypoint {waypoint_id}: {e}")
+                return False
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+
+    def get_all_waypoints(self) -> List[Dict]:
+        conn = None
+        with self.db_lock:
+            try:
+                conn = self._connect()
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT waypoint_id, title, description, waypoint_type, latitude, longitude, altitude, created_by, created_at, expires_at
+                    FROM waypoints
+                    ORDER BY created_at DESC
+                ''')
+                rows = cursor.fetchall()
+                now = time.time()
+                waypoints = []
+                for r in rows:
+                    exp = r[9]
+                    if exp is not None and exp < now:
+                        continue
+                    waypoints.append({
+                        'waypoint_id': r[0],
+                        'title': r[1],
+                        'description': r[2],
+                        'waypoint_type': r[3],
+                        'latitude': r[4],
+                        'longitude': r[5],
+                        'altitude': r[6],
+                        'created_by': r[7],
+                        'created_at': r[8],
+                        'expires_at': r[9]
+                    })
+                return waypoints
+            except Exception as e:
+                print(f"[PersistenceDatabase] Error getting all waypoints: {e}")
+                return []
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+
+    def delete_waypoint(self, waypoint_id: str) -> bool:
+        conn = None
+        with self.db_lock:
+            try:
+                conn = self._connect()
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM waypoints WHERE waypoint_id = ?', (waypoint_id,))
+                conn.commit()
+                return True
+            except Exception as e:
+                print(f"[PersistenceDatabase] Error deleting waypoint {waypoint_id}: {e}")
+                return False
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+
+    def scrub_expired_waypoints(self) -> int:
+        conn = None
+        with self.db_lock:
+            try:
+                conn = self._connect()
+                cursor = conn.cursor()
+                now = time.time()
+                cursor.execute('DELETE FROM waypoints WHERE expires_at IS NOT NULL AND expires_at < ?', (now,))
+                conn.commit()
+                deleted = cursor.rowcount
+                if deleted > 0:
+                    print(f"[PersistenceDatabase] Scrubbed {deleted} expired waypoints")
+                return deleted
+            except Exception as e:
+                print(f"[PersistenceDatabase] Error scrubbing expired waypoints: {e}")
+                return 0
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+
+    def revoke_peer(self, peer_id: str, reason: str, signature: Optional[str] = None) -> bool:
+        conn = None
+        with self.db_lock:
+            try:
+                conn = self._connect()
+                cursor = conn.cursor()
+                revoked_at = time.time()
+                cursor.execute('''
+                    INSERT OR REPLACE INTO revoked_peers (peer_id, reason, revoked_at, signature)
+                    VALUES (?, ?, ?, ?)
+                ''', (peer_id, reason, revoked_at, signature))
+                conn.commit()
+                print(f"[PersistenceDatabase] Peer {peer_id} blacklisted/revoked: {reason}")
+                return True
+            except Exception as e:
+                print(f"[PersistenceDatabase] Error revoking peer {peer_id}: {e}")
+                return False
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+
+    def is_peer_revoked(self, peer_id: str) -> bool:
+        conn = None
+        with self.db_lock:
+            try:
+                conn = self._connect()
+                cursor = conn.cursor()
+                cursor.execute('SELECT peer_id FROM revoked_peers WHERE peer_id = ?', (peer_id,))
+                row = cursor.fetchone()
+                return row is not None
+            except Exception as e:
+                print(f"[PersistenceDatabase] Error checking revocation for {peer_id}: {e}")
+                return False
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+
+    def get_revoked_peers(self) -> List[Dict]:
+        conn = None
+        with self.db_lock:
+            try:
+                conn = self._connect()
+                cursor = conn.cursor()
+                cursor.execute('SELECT peer_id, reason, revoked_at, signature FROM revoked_peers ORDER BY revoked_at DESC')
+                rows = cursor.fetchall()
+                results = []
+                for r in rows:
+                    results.append({
+                        'peer_id': r[0],
+                        'reason': r[1],
+                        'revoked_at': r[2],
+                        'signature': r[3]
+                    })
+                return results
+            except Exception as e:
+                print(f"[PersistenceDatabase] Error getting revoked peers: {e}")
+                return []
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+
+    def unrevoke_peer(self, peer_id: str) -> bool:
+        conn = None
+        with self.db_lock:
+            try:
+                conn = self._connect()
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM revoked_peers WHERE peer_id = ?', (peer_id,))
+                conn.commit()
+                return True
+            except Exception as e:
+                print(f"[PersistenceDatabase] Error un-revoking peer {peer_id}: {e}")
+                return False
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+
+    def create_group_channel(self, channel_id: str, channel_name: str, passphrase_salt: str, created_at: Optional[float] = None) -> bool:
+        if created_at is None:
+            created_at = time.time()
+        conn = None
+        with self.db_lock:
+            try:
+                conn = self._connect()
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT OR REPLACE INTO group_channels (channel_id, channel_name, passphrase_salt, created_at, is_active)
+                    VALUES (?, ?, ?, ?, 1)
+                ''', (channel_id, channel_name, passphrase_salt, created_at))
+                conn.commit()
+                print(f"[PersistenceDatabase] Created group channel: {channel_name} ({channel_id})")
+                return True
+            except Exception as e:
+                print(f"[PersistenceDatabase] Error creating group channel {channel_id}: {e}")
+                return False
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+
+    def get_all_group_channels(self) -> List[Dict]:
+        conn = None
+        with self.db_lock:
+            try:
+                conn = self._connect()
+                cursor = conn.cursor()
+                cursor.execute('SELECT channel_id, channel_name, passphrase_salt, created_at, is_active FROM group_channels WHERE is_active = 1 ORDER BY created_at ASC')
+                rows = cursor.fetchall()
+                channels = []
+                for r in rows:
+                    channels.append({
+                        'channel_id': r[0],
+                        'channel_name': r[1],
+                        'passphrase_salt': r[2],
+                        'created_at': r[3],
+                        'is_active': r[4]
+                    })
+                return channels
+            except Exception as e:
+                print(f"[PersistenceDatabase] Error getting group channels: {e}")
+                return []
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+
+    def delete_group_channel(self, channel_id: str) -> bool:
+        conn = None
+        with self.db_lock:
+            try:
+                conn = self._connect()
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM group_channels WHERE channel_id = ?', (channel_id,))
+                cursor.execute('DELETE FROM group_messages WHERE channel_id = ?', (channel_id,))
+                conn.commit()
+                return True
+            except Exception as e:
+                print(f"[PersistenceDatabase] Error deleting group channel {channel_id}: {e}")
+                return False
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+
+    def save_group_message(self, message_id: str, channel_id: str, sender_id: str, sender_name: str, content: str, timestamp: Optional[float] = None) -> bool:
+        if timestamp is None:
+            timestamp = time.time()
+        conn = None
+        with self.db_lock:
+            try:
+                conn = self._connect()
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT OR REPLACE INTO group_messages (message_id, channel_id, sender_id, sender_name, content, timestamp, is_read)
+                    VALUES (?, ?, ?, ?, ?, ?, 1)
+                ''', (message_id, channel_id, sender_id, sender_name, content, timestamp))
+                conn.commit()
+                return True
+            except Exception as e:
+                print(f"[PersistenceDatabase] Error saving group message: {e}")
+                return False
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+
+    def get_group_messages(self, channel_id: str, limit: int = 50) -> List[Dict]:
+        conn = None
+        with self.db_lock:
+            try:
+                conn = self._connect()
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT message_id, channel_id, sender_id, sender_name, content, timestamp, is_read
+                    FROM group_messages
+                    WHERE channel_id = ?
+                    ORDER BY timestamp ASC
+                    LIMIT ?
+                ''', (channel_id, limit))
+                rows = cursor.fetchall()
+                messages = []
+                for r in rows:
+                    messages.append({
+                        'message_id': r[0],
+                        'channel_id': r[1],
+                        'sender_id': r[2],
+                        'sender_name': r[3],
+                        'content': r[4],
+                        'timestamp': r[5],
+                        'is_read': r[6]
+                    })
+                return messages
+            except Exception as e:
+                print(f"[PersistenceDatabase] Error getting group messages for {channel_id}: {e}")
+                return []
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+

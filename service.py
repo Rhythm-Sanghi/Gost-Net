@@ -3,6 +3,7 @@ import threading
 import time
 import os
 import sys
+import json
 from datetime import datetime
 from typing import Optional, Callable, Dict
 
@@ -56,6 +57,9 @@ class ServiceNotificationManager:
                 print(f"[ServiceNotification] Channel setup error: {e}")
     
     def show_foreground_notification(self):
+        if not _is_android:
+            print("[ServiceNotification] (Desktop mock) Foreground notification active")
+            return True
         try:
             builder = NotificationCompat.Builder(service, self.channel_id)
             builder.setContentTitle("Ghost Net")
@@ -66,16 +70,30 @@ class ServiceNotificationManager:
             
             notification = builder.build()
             
-            notification_service = service.getSystemService(Context.NOTIFICATION_SERVICE)
-            notification_service.notify(self.notification_id, notification)
+            # Formally transition service to foreground to comply with Android 8.0+ (API 26+)
+            service.startForeground(self.notification_id, notification)
             
-            print("[ServiceNotification] Foreground notification displayed")
+            print("[ServiceNotification] Foreground notification active (service.startForeground called)")
             return True
         except Exception as e:
             print(f"[ServiceNotification] Error showing notification: {e}")
             return False
+
+    def stop_foreground_notification(self):
+        if not _is_android:
+            return True
+        try:
+            service.stopForeground(True)
+            print("[ServiceNotification] Foreground notification removed")
+            return True
+        except Exception as e:
+            print(f"[ServiceNotification] Error stopping foreground notification: {e}")
+            return False
     
     def show_message_notification(self, sender_name: str, message_preview: str):
+        if not _is_android:
+            print(f"[ServiceNotification] (Desktop mock) Message notification from {sender_name}: {message_preview[:50]}")
+            return True
         try:
             builder = NotificationCompat.Builder(service, self.channel_id)
             builder.setContentTitle(f"Message from {sender_name}")
@@ -97,12 +115,66 @@ class ServiceNotificationManager:
             return False
     
     def _get_app_icon(self):
+        if not _is_android:
+            return 17301651
         try:
             app_context = service.getApplicationContext()
             app_info = app_context.getApplicationInfo()
             return app_info.icon
         except:
             return 17301651
+
+
+class AndroidPowerManager:
+    """Manages Partial WakeLock and Wi-Fi Lock to keep mesh listening active on Android."""
+    def __init__(self):
+        self.wake_lock = None
+        self.wifi_lock = None
+        self._init_locks()
+
+    def _init_locks(self):
+        if not _is_android:
+            return
+        try:
+            PowerManager = autoclass('android.os.PowerManager')
+            power_service = service.getSystemService(Context.POWER_SERVICE)
+            self.wake_lock = power_service.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "GhostNet:MeshWakeLock")
+            self.wake_lock.setReferenceCounted(False)
+
+            WifiManager = autoclass('android.net.wifi.WifiManager')
+            wifi_service = service.getSystemService(Context.WIFI_SERVICE)
+            # Mode 3: WIFI_MODE_FULL_HIGH_PERF
+            self.wifi_lock = wifi_service.createWifiLock(3, "GhostNet:MeshWifiLock")
+            self.wifi_lock.setReferenceCounted(False)
+            print("[AndroidPowerManager] WakeLock and Wi-Fi Lock initialized")
+        except Exception as e:
+            print(f"[AndroidPowerManager] Lock initialization failed: {e}")
+
+    def acquire(self):
+        if not _is_android:
+            return
+        try:
+            if self.wake_lock and not self.wake_lock.isHeld():
+                self.wake_lock.acquire()
+                print("[AndroidPowerManager] Partial WakeLock acquired")
+            if self.wifi_lock and not self.wifi_lock.isHeld():
+                self.wifi_lock.acquire()
+                print("[AndroidPowerManager] Wi-Fi Lock acquired")
+        except Exception as e:
+            print(f"[AndroidPowerManager] Failed to acquire locks: {e}")
+
+    def release(self):
+        if not _is_android:
+            return
+        try:
+            if self.wake_lock and self.wake_lock.isHeld():
+                self.wake_lock.release()
+                print("[AndroidPowerManager] Partial WakeLock released")
+            if self.wifi_lock and self.wifi_lock.isHeld():
+                self.wifi_lock.release()
+                print("[AndroidPowerManager] Wi-Fi Lock released")
+        except Exception as e:
+            print(f"[AndroidPowerManager] Failed to release locks: {e}")
 
 
 class LightweightGhostEngine:
@@ -118,11 +190,14 @@ class LightweightGhostEngine:
     
     def __init__(self, username: str = "GhostUser", 
                  on_message_received: Optional[Callable] = None,
-                 persistence_db: Optional[object] = None):
+                 persistence_db: Optional[object] = None,
+                 notification_manager: Optional[object] = None):
         self.username = username
         self.running = False
         self.on_message_received = on_message_received
         self.persistence_db = persistence_db
+        self.notification_manager = notification_manager
+        self.power_manager = AndroidPowerManager()
         
         self.peers = {}
         self.peer_lock = threading.Lock()
@@ -147,6 +222,7 @@ class LightweightGhostEngine:
             return
         
         self.running = True
+        self.power_manager.acquire()
         print(f"[LightweightEngine] Starting background service as '{self.username}'")
         
         threading.Thread(target=self._run_udp_listener, daemon=True).start()
@@ -156,6 +232,13 @@ class LightweightGhostEngine:
     
     def stop(self):
         self.running = False
+        self.power_manager.release()
+        
+        if self.notification_manager and hasattr(self.notification_manager, 'stop_foreground_notification'):
+            try:
+                self.notification_manager.stop_foreground_notification()
+            except Exception:
+                pass
         
         if self.udp_socket:
             try:
@@ -246,8 +329,13 @@ class LightweightGhostEngine:
     
     def _handle_beacon(self, data: bytes, addr):
         try:
-            beacon_str = data.decode('utf-8', errors='ignore')
-            beacon_data = eval(beacon_str) if beacon_str.startswith('{') else None
+            beacon_str = data.decode('utf-8', errors='ignore').strip()
+            beacon_data = None
+            if beacon_str.startswith('{'):
+                try:
+                    beacon_data = json.loads(beacon_str)
+                except Exception:
+                    beacon_data = None
             
             if isinstance(beacon_data, dict):
                 peer_ip = addr[0]
@@ -283,8 +371,11 @@ class LightweightGhostEngine:
                 payload = received_data[header_end + len(self.HEADER_DELIMITER):]
                 
                 try:
-                    header_str = header_bytes.decode('utf-8')
-                    header = eval(header_str)
+                    header_str = header_bytes.decode('utf-8', errors='ignore').strip()
+                    try:
+                        header = json.loads(header_str)
+                    except Exception:
+                        header = {}
                 except:
                     header = {}
                 
@@ -389,7 +480,7 @@ class LightweightGhostEngine:
                         'username': self.username,
                         'timestamp': time.time()
                     }
-                    beacon_bytes = str(beacon_data).encode('utf-8')
+                    beacon_bytes = json.dumps(beacon_data).encode('utf-8')
                     
                     beacon_socket.sendto(beacon_bytes, ('<broadcast>', self.UDP_PORT))
                     time.sleep(self.BEACON_INTERVAL)
@@ -429,6 +520,10 @@ def main():
     notification_manager = None
     if _is_android:
         notification_manager = ServiceNotificationManager()
+        try:
+            notification_manager.show_foreground_notification()
+        except Exception as e:
+            print(f"[Service] Foreground notification error: {e}")
     
     def on_message_received_callback(peer_ip: str, message: str, timestamp: float):
         print(f"[Service] Message from {peer_ip}: {message}")
@@ -442,16 +537,11 @@ def main():
     engine = LightweightGhostEngine(
         username=username,
         on_message_received=on_message_received_callback,
-        persistence_db=persistence_db
+        persistence_db=persistence_db,
+        notification_manager=notification_manager
     )
     
     engine.start()
-    
-    if notification_manager and _is_android:
-        try:
-            notification_manager.show_foreground_notification()
-        except Exception as e:
-            print(f"[Service] Foreground notification error: {e}")
     
     print("[Service] Background service running. Press Ctrl+C to stop.")
     

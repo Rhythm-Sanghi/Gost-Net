@@ -6,10 +6,18 @@ Handles app settings, user preferences, and hot-reloading.
 
 import json
 import os
+import sys
 import threading
 import random
 import string
 from typing import Any, Dict, Optional
+
+_src_dir = os.path.dirname(os.path.abspath(__file__))
+if _src_dir not in sys.path:
+    sys.path.insert(0, _src_dir)
+
+# Single authoritative application version source
+APP_VERSION = "1.0.0"
 
 
 class ConfigManager:
@@ -218,7 +226,10 @@ class ConfigManager:
         """Delete the configuration file."""
         try:
             if os.path.exists(self.config_path):
-                from security import shred_file
+                try:
+                    from src.security import shred_file
+                except ImportError:
+                    from security import shred_file
                 shred_file(self.config_path)
                 print(f"[ConfigManager] Shredded config file: {self.config_path}")
         except Exception as e:

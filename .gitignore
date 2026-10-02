@@ -20,6 +20,7 @@ env/
 ENV/
 .env
 .env.*
+!.env.example
 
 # ─── Distribution / Packaging ────────────────────────────────────────────────
 dist/
@@ -58,6 +59,15 @@ bin/
 
 # ─── Secrets & Cryptographic Keys ────────────────────────────────────────────
 secret.key
+secret.key.enc
+signing.key.enc
+.db_salt
+.decoy_mode
+.failed_attempts
+.dead_man_switch
+spool/
+notes.txt
+*.part
 *.pem
 *.p12
 *.pfx
@@ -65,6 +75,9 @@ secret.key
 *.cer
 ghostnet.db
 ghostnet_persistence.db
+.auth_secrets
+test_*.db*
+test_*.key
 
 # ─── User Data & Runtime State ───────────────────────────────────────────────
 downloads/
@@ -97,6 +110,7 @@ Thumbs.db
 desktop.ini
 
 # ─── Scratch / Internal AI Artifacts ─────────────────────────────────────────
+scratch/
 plans/
 mockups/
 web/

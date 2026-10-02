@@ -1,9 +1,15 @@
+import os
+import sys
 import socket
 import json
 import threading
 import time
 from typing import Dict, List, Optional, Callable
 from enum import Enum
+
+_src_dir = os.path.dirname(os.path.abspath(__file__))
+if _src_dir not in sys.path:
+    sys.path.insert(0, _src_dir)
 
 from android_mocks import is_android, get_android_wifi_direct, get_android_bluetooth
 

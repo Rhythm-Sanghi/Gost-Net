@@ -1,4 +1,4 @@
-name: Build Android APK
+name: CI — Test & Build
 
 on:
   push:
@@ -8,28 +8,93 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  # ─── Test Suite ───────────────────────────────────────────────────────────────
+  test:
+    name: Tests (Python 3.11)
     runs-on: ubuntu-latest
-    
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install system dependencies (headless Kivy)
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends \
+          libgl1-mesa-dev \
+          libgles2-mesa-dev \
+          libsdl2-dev \
+          libsdl2-image-dev \
+          libsdl2-mixer-dev \
+          libsdl2-ttf-dev \
+          python3-dev \
+          xvfb
+
+    - name: Install Python test dependencies
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-asyncio
+
+    - name: Python compile check (all production source files)
+      run: |
+        python -m compileall -q src/ main.py service.py
+
+    - name: Run unit and integration tests (headless)
+      env:
+        GOSTNET_TEST_MODE: "1"
+        DISPLAY: ":99"
+      run: |
+        Xvfb :99 -screen 0 1024x768x24 &
+        python -m pytest tests/ \
+          --tb=short \
+          -q \
+          --asyncio-mode=auto \
+          --timeout=120 \
+          -x \
+          2>&1 | tee test_output.txt
+        echo "Exit code: $?"
+
+    - name: Upload test output
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results-${{ github.run_number }}
+        path: test_output.txt
+        retention-days: 14
+        if-no-files-found: ignore
+
+  # ─── Android APK Build (Track A — Sideload / API 33 / NDK r25b) ──────────────
+  build:
+    name: Android APK Build (Track A — Sideload)
+    needs: test
+    runs-on: ubuntu-latest
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
-        
-    - name: Initialize git repository for build metadata
+
+    - name: Configure Git for build metadata
       run: |
-        git config --global user.email "build@ghostnet.local"
-        git config --global user.name "Ghost Net Builder"
-       
-    - name: Set up Python 3.10
+        git config --global user.email "build@gostnet.local"
+        git config --global user.name "Gost-Net Builder"
+
+    # ── Python 3.11 to match p4a hostpython3==3.11.9 recipe ──
+    - name: Set up Python 3.11
       uses: actions/setup-python@v5
       with:
-        python-version: '3.10'
-        
-    - name: Install system dependencies
+        python-version: '3.11'
+
+    - name: Install system build dependencies
       run: |
-        sudo apt-get update
+        sudo apt-get update -qq
         sudo apt-get install -y \
           build-essential \
           g++ \
@@ -53,57 +118,78 @@ jobs:
           python3-pip \
           ant \
           ccache
-          
-    - name: Install Rust toolchain for Android cross-compilation
+
+    # ── Rust is required by the `cryptography` p4a recipe ──
+    - name: Install Rust stable toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
-        targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
-        
-    - name: Set Java options (prevent OOM errors)
+        targets: aarch64-linux-android
+
+    # ── Ensure ~/.cargo/bin is on PATH for all subsequent steps ──
+    - name: Add Cargo bin to PATH
+      run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+    - name: Verify Rust toolchain
+      run: |
+        rustup --version
+        cargo --version
+        rustup target list --installed | grep aarch64-linux-android
+
+    - name: Set Java and build options
       run: |
         echo "_JAVA_OPTIONS=-Xms512m -Xmx2048m" >> $GITHUB_ENV
         echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
 
-    - name: Setup Android SDK Path permissions
+    # ── Android SDK — use the pre-installed SDK on ubuntu-latest ──
+    - name: Configure Android SDK
       run: |
-        sudo mkdir -p /usr/local/lib/android/sdk/ndk
-        sudo chown -R runner:runner /usr/local/lib/android/sdk
+        # ubuntu-latest runners ship with Android SDK at $ANDROID_SDK_ROOT
+        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+        echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+        sudo chown -R runner:runner "$ANDROID_SDK_ROOT" || true
+        # Accept all SDK licences
+        yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+        # Install platform-33 and build-tools if not already present
+        "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+          "platforms;android-33" \
+          "build-tools;33.0.2" || true
 
-    - name: Cache Android NDK
+    - name: Cache Android NDK r25b
       id: cache-ndk
       uses: actions/cache@v4
       with:
-        path: /usr/local/lib/android/sdk/ndk/25.1.8937393
-        key: ${{ runner.os }}-ndk-25.1.8937393
+        path: /opt/android-ndk-r25b
+        key: ${{ runner.os }}-ndk-r25b-25.1.8937393
 
-    - name: Download and extract Android NDK r25b
+    - name: Download Android NDK r25b
       if: steps.cache-ndk.outputs.cache-hit != 'true'
       run: |
-        if [ ! -f /tmp/android-ndk-r25b-linux.zip ]; then
-          cd /tmp
-          wget --quiet https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
-        fi
-        unzip -q /tmp/android-ndk-r25b-linux.zip -d /tmp
-        mv /tmp/android-ndk-r25b /usr/local/lib/android/sdk/ndk/25.1.8937393
+        wget --quiet -O /tmp/android-ndk-r25b-linux.zip \
+          https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
+        unzip -q /tmp/android-ndk-r25b-linux.zip -d /opt
+        mv /opt/android-ndk-r25b /opt/android-ndk-r25b
+        echo "NDK extracted to /opt/android-ndk-r25b"
 
-    - name: Setup Android SDK Path for Buildozer
+    - name: Set NDK environment variables
       run: |
-        sudo chown -R runner:runner /usr/local/lib/android/sdk
-        ln -sfn /usr/local/lib/android/sdk/cmdline-tools/latest /usr/local/lib/android/sdk/tools
-        yes | /usr/local/lib/android/sdk/tools/bin/sdkmanager --sdk_root=/usr/local/lib/android/sdk --licenses || true
-        yes | /usr/local/lib/android/sdk/tools/bin/sdkmanager --sdk_root=/usr/local/lib/android/sdk "platforms;android-33" "build-tools;33.0.2"
-        
-    - name: Cache Buildozer directory
+        echo "ANDROID_NDK_HOME=/opt/android-ndk-r25b" >> $GITHUB_ENV
+        echo "ANDROID_NDK_ROOT=/opt/android-ndk-r25b" >> $GITHUB_ENV
+        echo "ANDROID_NDK=/opt/android-ndk-r25b" >> $GITHUB_ENV
+        echo "ANDROIDNDK=/opt/android-ndk-r25b" >> $GITHUB_ENV
+        echo "ANDROIDSDK=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+        echo "ANDROIDAPI=33" >> $GITHUB_ENV
+        echo "ANDROIDMINAPI=21" >> $GITHUB_ENV
+
+    - name: Cache Buildozer platform directory
       uses: actions/cache@v4
       with:
-        path: |
-          .buildozer
-          ~/.buildozer
-        key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec', 'requirements.txt') }}
+        path: ~/.buildozer
+        key: ${{ runner.os }}-buildozer-sideload-${{ hashFiles('buildozer-sideload.spec', 'requirements.txt') }}
         restore-keys: |
+          ${{ runner.os }}-buildozer-sideload-
           ${{ runner.os }}-buildozer-
 
-    - name: Cache Pip cache
+    - name: Cache pip
       uses: actions/cache@v4
       with:
         path: ~/.cache/pip
@@ -115,104 +201,82 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/.ccache
-        key: ${{ runner.os }}-ccache-${{ hashFiles('buildozer.spec', 'requirements.txt') }}-${{ github.run_id }}
+        key: ${{ runner.os }}-ccache-${{ hashFiles('buildozer-sideload.spec', 'requirements.txt') }}-${{ github.run_id }}
         restore-keys: |
-          ${{ runner.os }}-ccache-${{ hashFiles('buildozer.spec', 'requirements.txt') }}-
+          ${{ runner.os }}-ccache-${{ hashFiles('buildozer-sideload.spec', 'requirements.txt') }}-
           ${{ runner.os }}-ccache-
 
-    - name: Install Python dependencies
+    - name: Install Python build dependencies
       run: |
         pip install --upgrade pip
         pip install --upgrade buildozer
-        pip install --upgrade cython==0.29.33
+        pip install --upgrade "cython==0.29.33"
         pip install -r requirements.txt
-        
-    - name: Configure Cython for Python 3 compatibility
+
+    # ── Use the validated sideload spec (Track A) ──
+    - name: Select Track A (sideload) build spec
       run: |
-        mkdir -p ~/.cython
-        cat > ~/.cython/cythonrc << 'EOF'
-        [build_ext]
-        compiler_directives = {"language_level": "3"}
-        EOF
-        
-    - name: Configure python-for-android for Cython Python 3
-      run: |
-        mkdir -p ~/.buildozer/android/platform/build-tools
-        cat > ~/.buildozer/cython_directives.txt << 'EOF'
-        language_level=3
-        EOF
-    - name: Check for release secrets
+        cp buildozer-sideload.spec buildozer.spec
+        echo "Active buildozer.spec contents:"
+        head -30 buildozer.spec
+
+    # ── Check for signing secrets ──
+    - name: Check for release signing secrets
       id: check_secrets
       run: |
-        if [ -n "${{ secrets.KEYSTORE_PASSWORD }}" ] && [ -n "${{ secrets.KEY_ALIAS }}" ] && [ -n "${{ secrets.KEY_PASSWORD }}" ]; then
+        if [ -n "${{ secrets.KEYSTORE_PASSWORD }}" ] && \
+           [ -n "${{ secrets.KEY_ALIAS }}" ] && \
+           [ -n "${{ secrets.KEY_PASSWORD }}" ]; then
           echo "has_secrets=true" >> $GITHUB_OUTPUT
         else
           echo "has_secrets=false" >> $GITHUB_OUTPUT
         fi
-        
-    - name: Decode and setup keystore (Release only)
+
+    - name: Decode keystore (release only)
       if: steps.check_secrets.outputs.has_secrets == 'true'
       run: |
         echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > ghostnet.keystore
-        
-    - name: Build debug APK
+
+    # ── Main build step ──
+    - name: Build debug APK (Track A)
       if: steps.check_secrets.outputs.has_secrets == 'false'
       env:
-        ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-        ANDROID_HOME: /usr/local/lib/android/sdk
-        ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/25.1.8937393
-        ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/25.1.8937393
-        ANDROID_NDK: /usr/local/lib/android/sdk/ndk/25.1.8937393
-        ANDROIDSDK: /usr/local/lib/android/sdk
-        ANDROIDNDK: /usr/local/lib/android/sdk/ndk/25.1.8937393
-        ANDROIDAPI: 33
-        ANDROIDMINAPI: 21
         MAKEFLAGS: -j2
         CCACHE_DIR: /home/runner/.ccache
         CCACHE_MAXSIZE: 1G
       run: |
-        buildozer -v android debug > buildozer.log 2>&1 || (tail -n 2000 buildozer.log && exit 1)
-        
-    - name: Build release APK
+        buildozer -v android debug > buildozer.log 2>&1 || \
+          (tail -n 2000 buildozer.log && exit 1)
+
+    - name: Build release APK (Track A, signed)
       if: steps.check_secrets.outputs.has_secrets == 'true'
       env:
         KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-        ANDROID_HOME: /usr/local/lib/android/sdk
-        ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/25.1.8937393
-        ANDROID_NDK_ROOT: /usr/local/lib/android/sdk/ndk/25.1.8937393
-        ANDROID_NDK: /usr/local/lib/android/sdk/ndk/25.1.8937393
-        ANDROIDSDK: /usr/local/lib/android/sdk
-        ANDROIDNDK: /usr/local/lib/android/sdk/ndk/25.1.8937393
-        ANDROIDAPI: 33
-        ANDROIDMINAPI: 21
         MAKEFLAGS: -j2
         CCACHE_DIR: /home/runner/.ccache
         CCACHE_MAXSIZE: 1G
       run: |
-        buildozer -v android release > buildozer.log 2>&1 || (tail -n 2000 buildozer.log && exit 1)
-        
+        buildozer -v android release > buildozer.log 2>&1 || \
+          (tail -n 2000 buildozer.log && exit 1)
+
     - name: Sign release APK
       if: steps.check_secrets.outputs.has_secrets == 'true'
       run: |
         APK_PATH=$(find bin -name "*.apk" -type f | head -n 1)
         SIGNED_APK_PATH="${APK_PATH%-unsigned.apk}-signed.apk"
-        
-        $ANDROID_HOME/build-tools/*/apksigner sign \
+        $ANDROID_SDK_ROOT/build-tools/33.0.2/apksigner sign \
           --ks ghostnet.keystore \
           --ks-pass pass:"${{ secrets.KEYSTORE_PASSWORD }}" \
           --key-pass pass:"${{ secrets.KEY_PASSWORD }}" \
           --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
           --out "$SIGNED_APK_PATH" \
           "$APK_PATH"
-          
-        $ANDROID_HOME/build-tools/*/apksigner verify "$SIGNED_APK_PATH"
-        
+        $ANDROID_SDK_ROOT/build-tools/33.0.2/apksigner verify "$SIGNED_APK_PATH"
         echo "Signed APK: $SIGNED_APK_PATH"
-        
-    - name: Get APK filename
+
+    - name: Locate APK
       id: apk_name
       run: |
         if [ "${{ steps.check_secrets.outputs.has_secrets }}" == "true" ]; then
@@ -222,15 +286,17 @@ jobs:
         fi
         echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
         echo "apk_name=$(basename $APK_PATH)" >> $GITHUB_OUTPUT
-        
+        echo "APK located: $APK_PATH"
+        ls -lh "$APK_PATH"
+
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
       with:
-        name: ghostnet-apk-${{ github.run_number }}
+        name: gost-net-android-rc1
         path: ${{ steps.apk_name.outputs.apk_path }}
         retention-days: 30
 
-    - name: Upload Buildozer log artifact
+    - name: Upload Buildozer log
       if: always()
       uses: actions/upload-artifact@v4
       with:
@@ -238,56 +304,35 @@ jobs:
         path: buildozer.log
         retention-days: 7
         if-no-files-found: ignore
-        
-    - name: Generate build report
+
+    - name: Compute APK SHA-256
       if: always()
       run: |
-        echo "## 📱 Build Report" >> $GITHUB_STEP_SUMMARY
+        if [ -f "${{ steps.apk_name.outputs.apk_path }}" ]; then
+          sha256sum "${{ steps.apk_name.outputs.apk_path }}"
+        else
+          echo "APK not found — build may have failed"
+        fi
+
+    - name: Build summary
+      if: always()
+      run: |
+        echo "## 📱 Gost-Net Android Build Report" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Build Type:** ${{ steps.check_secrets.outputs.has_secrets == 'true' && 'Release (Signed)' || 'Debug' }}" >> $GITHUB_STEP_SUMMARY
-        echo "**Run Number:** ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
-        echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-        echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-        
+        echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+        echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+        echo "| **Build Type** | ${{ steps.check_secrets.outputs.has_secrets == 'true' && 'Release (Signed)' || 'Debug' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Run** | ${{ github.run_number }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Commit** | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Branch** | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Track** | A — Sideload (API 33 / NDK r25b) |" >> $GITHUB_STEP_SUMMARY
         if [ -f "${{ steps.apk_name.outputs.apk_path }}" ]; then
           APK_SIZE=$(du -h "${{ steps.apk_name.outputs.apk_path }}" | cut -f1)
-          echo "**APK Size:** $APK_SIZE" >> $GITHUB_STEP_SUMMARY
-          echo "**APK Name:** ${{ steps.apk_name.outputs.apk_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "| **APK** | ${{ steps.apk_name.outputs.apk_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Size** | $APK_SIZE |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Build successful!**" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Download the APK from the **Artifacts** section below." >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Build successful — artifact: \`gost-net-android-rc1\`**" >> $GITHUB_STEP_SUMMARY
         else
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "❌ **Build failed!**" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Check the build logs for errors." >> $GITHUB_STEP_SUMMARY
+          echo "❌ **Build failed — check buildozer log artifact**" >> $GITHUB_STEP_SUMMARY
         fi
-        
-    - name: Comment on PR (if applicable)
-      if: github.event_name == 'pull_request' && steps.apk_name.outputs.apk_path != ''
-      uses: actions/github-script@v7
-      with:
-        script: |
-          const apkName = '${{ steps.apk_name.outputs.apk_name }}';
-          const buildType = '${{ steps.check_secrets.outputs.has_secrets == 'true' && 'Release (Signed)' || 'Debug' }}';
-          const runNumber = '${{ github.run_number }}';
-          
-          const body = `## 📱 APK Build Complete
-          
-          **Build Type:** ${buildType}
-          **APK:** \`${apkName}\`
-          **Run:** [#${runNumber}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-          
-          Download the APK from the **Artifacts** section of the workflow run.
-          
-          ---
-          
-          🤖 *Automated by GitHub Actions*`;
-          
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: body
-          });

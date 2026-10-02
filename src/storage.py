@@ -43,6 +43,14 @@ class DatabaseManager:
         self.db_lock = threading.Lock()
         self.initialization_error = None
         
+        # Ensure parent directories exist
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
+        key_dir = os.path.dirname(self.key_path)
+        if key_dir:
+            os.makedirs(key_dir, exist_ok=True)
+
         # Initialize encryption and database with error handling
         try:
             self._initialize_encryption()
@@ -558,6 +566,16 @@ class DatabaseManager:
                     except:
                         pass
     
+    def set_ephemeral_mode(self, enabled: bool):
+        """Enable or disable RAM-only ephemeral chat mode."""
+        with self.db_lock:
+            self.ephemeral_mode = enabled
+
+    def clear_ephemeral_messages(self):
+        """Clear all in-memory ephemeral messages."""
+        with self.db_lock:
+            self.ephemeral_messages.clear()
+
     def export_chat(self, peer_ip: str, output_path: str) -> bool:
         """
         Export chat history to a text file (decrypted).
@@ -570,6 +588,10 @@ class DatabaseManager:
             True if successful
         """
         try:
+            out_dir = os.path.dirname(output_path)
+            if out_dir:
+                os.makedirs(out_dir, exist_ok=True)
+
             messages = self.get_history(peer_ip, limit=10000)
             username = self.get_peer_username(peer_ip) or peer_ip
             

@@ -14,7 +14,6 @@ Permissions Required:
 - ACCESS_WIFI_STATE: Wi-Fi state monitoring
 - BLUETOOTH: Classic Bluetooth (API 30 and earlier)
 - BLUETOOTH_ADMIN: Bluetooth device pairing
-- LOCAL_MAC_ADDRESS (API 33+): Query local MAC for P2P
 """
 
 import logging
@@ -33,6 +32,13 @@ try:
     PYJNIUS_AVAILABLE = True
 except ImportError:
     PYJNIUS_AVAILABLE = False
+    autoclass = None
+    class PythonJavaClass:
+        pass
+    def java_method(signature):
+        def decorator(f):
+            return f
+        return decorator
     logger.warning("[Permissions] pyjnius not available - Android permissions disabled")
 
 
@@ -133,15 +139,6 @@ PERMISSION_DEFINITIONS = {
         group=PermissionGroup.WIFI_P2P,
         critical=True,
         fallback_message="Wi-Fi Direct control unavailable - state change permission denied"
-    ),
-    
-    # Local MAC Address (API 33+)
-    'LOCAL_MAC_ADDRESS': PermissionConfig(
-        name='android.permission.LOCAL_MAC_ADDRESS',
-        min_api=33,
-        group=PermissionGroup.WIFI_P2P,
-        critical=False,
-        fallback_message="Local MAC address unavailable"
     ),
 }
 
