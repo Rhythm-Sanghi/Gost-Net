@@ -6,6 +6,17 @@ from pythonforandroid.recipe import RustCompiledComponentsRecipe
 
 
 class CryptographyRecipe(RustCompiledComponentsRecipe):
+    """Rust-built ``cryptography`` extension for Android.
+
+    No linker flags are added here. NDK r28+ is the single enforcement point for
+    16 KB page sizes: its clang driver injects ``-z max-page-size=16384`` into
+    every link line (verified with ``clang -###``), and LLD 19 already defaults
+    to 16 KB, so an explicit flag would be redundant. Adding one "for safety"
+    would obscure the real provenance of the alignment.
+
+    The only thing this override genuinely needs is the DT_NEEDED fix below.
+    """
+
     name = "cryptography"
     version = "46.0.3"
     url = "https://github.com/pyca/cryptography/archive/refs/tags/{version}.tar.gz"

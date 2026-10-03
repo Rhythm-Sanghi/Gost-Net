@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      clean_native:
+        description: "Discard any cached native (p4a/NDK) build state and rebuild every native dependency from source"
+        type: boolean
+        default: true
 
 jobs:
   # ─── Test Suite ───────────────────────────────────────────────────────────────
@@ -63,6 +68,17 @@ jobs:
           -x \
           2>&1 | tee test_output.txt
 
+    # The release verifier is a mandatory gate in its own right: it re-checks
+    # packaging spec sanity, research isolation, release-secret scanning and
+    # re-runs the core suite. It runs before any APK is produced.
+    - name: Release qualification verifier
+      env:
+        GOSTNET_TEST_MODE: "1"
+        DISPLAY: ":99"
+      run: |
+        set -o pipefail
+        python scripts/verify_release.py 2>&1 | tee verify_release_output.txt
+
     - name: Upload test output
       if: always()
       uses: actions/upload-artifact@v4
@@ -72,7 +88,7 @@ jobs:
         retention-days: 14
         if-no-files-found: ignore
 
-  # ─── Android APK Build (Track A — Sideload / API 33 / NDK r25b) ──────────────
+  # ─── Android APK Build (Track A — Sideload / API 36 / NDK r28b / 16 KB pages) ──
   build:
     name: Android APK Build (Track A — Sideload)
     needs: test
@@ -155,49 +171,104 @@ jobs:
         sudo chown -R runner:runner "$SDK_ROOT" || true
         yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_ROOT" --licenses || true
         "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_ROOT" \
+          "platforms;android-36" \
           "platforms;android-33" \
-          "build-tools;33.0.2" || true
+          "build-tools;35.0.0" || true
 
-    - name: Cache Android NDK r25b
+    # Resolve the exact toolchain identity BEFORE any cache is restored, so the
+    # cache key can be bound to it. Section 18 of the qualification requires the
+    # NDK revision and the python-for-android build to participate in the key;
+    # otherwise an r25-era or otherwise different p4a build can silently satisfy
+    # an r28 build and ship 4 KB-aligned objects.
+    - name: Resolve native toolchain identity
+      id: toolchain
+      run: |
+        set -euo pipefail
+        NDK_REV=28.1.13356709
+        P4A_VER=$(python3 -m pip show python-for-android 2>/dev/null \
+                  | awk -F': ' '/^Version:/{print $2}')
+        BUILD0ZER_VER=$(python3 -m pip show buildozer 2>/dev/null \
+                  | awk -F': ' '/^Version:/{print $2}')
+        if [ -z "$P4A_VER" ]; then
+          echo "ERROR: python-for-android is not importable; cannot pin the cache key."
+          exit 1
+        fi
+        echo "ndk_rev=$NDK_REV"                >> $GITHUB_OUTPUT
+        echo "p4a_version=${P4A_VER}"          >> $GITHUB_OUTPUT
+        echo "buildozer_version=${BUILD0ZER_VER:-unknown}" >> $GITHUB_OUTPUT
+        {
+          echo "### native build identity ###"
+          echo "NDK              : r${NDK_REV}"
+          echo "python-for-android: ${P4A_VER}"
+          echo "buildozer        : ${BUILD0ZER_VER:-unknown}"
+          echo "target API / min : 36 / 21"
+          echo "arch             : arm64-v8a"
+        } >> $GITHUB_STEP_SUMMARY
+
+    - name: Cache Android NDK r28b
       id: cache-ndk
       uses: actions/cache@v4
       with:
-        path: /home/runner/.buildozer/android/platform/android-ndk-r25b
-        key: ${{ runner.os }}-ndk-r25b-25.1.8937393
+        path: /home/runner/.buildozer/android/platform/android-ndk-r28b
+        key: ${{ runner.os }}-ndk-r28b-${{ steps.toolchain.outputs.ndk_rev }}
 
-    - name: Download Android NDK r25b
+    - name: Download Android NDK r28b
       if: steps.cache-ndk.outputs.cache-hit != 'true'
       run: |
         mkdir -p "$HOME/.buildozer/android/platform"
-        if [ ! -d "$HOME/.buildozer/android/platform/android-ndk-r25b" ]; then
-          echo "Downloading Android NDK r25b..."
-          wget --quiet -O /tmp/android-ndk-r25b-linux.zip \
-            https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
-          unzip -q /tmp/android-ndk-r25b-linux.zip -d "$HOME/.buildozer/android/platform"
+        if [ ! -d "$HOME/.buildozer/android/platform/android-ndk-r28b" ]; then
+          echo "Downloading Android NDK r28b..."
+          wget --quiet -O /tmp/android-ndk-r28b-linux.zip \
+            https://dl.google.com/android/repository/android-ndk-r28b-linux.zip
+          unzip -q /tmp/android-ndk-r28b-linux.zip -d "$HOME/.buildozer/android/platform"
           echo "NDK extracted successfully."
         else
-          echo "NDK r25b already present."
+          echo "NDK r28b already present."
         fi
 
     - name: Set NDK environment variables
       run: |
-        NDK_PATH="$HOME/.buildozer/android/platform/android-ndk-r25b"
+        NDK_PATH="$HOME/.buildozer/android/platform/android-ndk-r28b"
         echo "ANDROID_NDK_HOME=$NDK_PATH" >> $GITHUB_ENV
         echo "ANDROID_NDK_ROOT=$NDK_PATH" >> $GITHUB_ENV
         echo "ANDROID_NDK=$NDK_PATH" >> $GITHUB_ENV
         echo "ANDROIDNDK=$NDK_PATH" >> $GITHUB_ENV
         echo "ANDROIDSDK=/usr/local/lib/android/sdk" >> $GITHUB_ENV
-        echo "ANDROIDAPI=33" >> $GITHUB_ENV
+        echo "ANDROIDAPI=36" >> $GITHUB_ENV
         echo "ANDROIDMINAPI=21" >> $GITHUB_ENV
 
+    # The native cache key is bound to the full build identity required by the
+    # qualification: runner OS, NDK revision, python-for-android build, target
+    # and min API, the spec, the requirements and the custom recipe directory
+    # (which includes the local Kivy recipe and its vendored patches).
+    #
+    # There is deliberately NO restore-keys fallback. A key miss must mean a
+    # genuinely clean native build, never a partially-stale p4a distribution:
+    # the Kivy recipe defect in this release was invisible locally for exactly
+    # as long as a cached native build kept satisfying it.
     - name: Cache Buildozer platform directory
       uses: actions/cache@v4
       with:
-        path: ~/.buildozer
-        key: ${{ runner.os }}-buildozer-sideload-${{ hashFiles('buildozer-sideload.spec', 'requirements.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-buildozer-sideload-
-          ${{ runner.os }}-buildozer-
+        path: ~/.buildozer/android/platform/build-arm64-v8a
+        key: ${{ runner.os }}-${{ runner.arch }}-native-api36-min21-arm64-v8a-ndk${{ steps.toolchain.outputs.ndk_rev }}-p4a${{ steps.toolchain.outputs.p4a_version }}-spec${{ hashFiles('buildozer-sideload.spec') }}-req${{ hashFiles('requirements.txt') }}-recipes${{ hashFiles('p4a_recipes/**') }}
+
+    # Explicit, auditable clean-native switch. The hosted runner is already a
+    # fresh VM, so this only removes anything the cache step above restored.
+    # Set clean_native=true on the first qualification run to prove that a
+    # clean checkout plus the new Kivy recipe plus NDK r28 yields a working APK.
+    #
+    # ccache is deliberately NOT cleared: it is content-addressed on the
+    # preprocessor command line, which embeds the NDK compiler path and the
+    # driver-injected -z max-page-size, so an r25-era object can never satisfy
+    # an r28 compile. It is restored immediately below regardless.
+    - name: Clean native build state
+      if: ${{ inputs.clean_native != false }}
+      run: |
+        set -euo pipefail
+        echo "### removing any restored native build state ###"
+        rm -rf ~/.buildozer/android/platform/build-arm64-v8a
+        mkdir -p ~/.buildozer/android/platform
+        echo "clean native state: $(ls -A ~/.buildozer/android/platform 2>/dev/null | tr '\n' ' ' || echo empty)"
 
     - name: Cache pip
       uses: actions/cache@v4
@@ -207,14 +278,15 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-pip-
 
+    # ccache is safe to share across NDK revisions because object files are
+    # keyed by the preprocessor command line, which embeds the compiler path.
     - name: Cache ccache
       uses: actions/cache@v4
       with:
         path: ~/.ccache
-        key: ${{ runner.os }}-ccache-${{ hashFiles('buildozer-sideload.spec', 'requirements.txt') }}-${{ github.run_id }}
+        key: ${{ runner.os }}-ccache-ndk${{ steps.toolchain.outputs.ndk_rev }}-p4a${{ steps.toolchain.outputs.p4a_version }}-${{ hashFiles('buildozer-sideload.spec', 'requirements.txt', 'p4a_recipes/**') }}
         restore-keys: |
-          ${{ runner.os }}-ccache-${{ hashFiles('buildozer-sideload.spec', 'requirements.txt') }}-
-          ${{ runner.os }}-ccache-
+          ${{ runner.os }}-ccache-ndk${{ steps.toolchain.outputs.ndk_rev }}-p4a${{ steps.toolchain.outputs.p4a_version }}-
 
     - name: Install Python build dependencies
       run: |
@@ -256,10 +328,10 @@ jobs:
         ANDROIDSDK: /usr/local/lib/android/sdk
         ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
         ANDROID_HOME: /usr/local/lib/android/sdk
-        ANDROIDNDK: /home/runner/.buildozer/android/platform/android-ndk-r25b
-        ANDROID_NDK_HOME: /home/runner/.buildozer/android/platform/android-ndk-r25b
-        ANDROID_NDK_ROOT: /home/runner/.buildozer/android/platform/android-ndk-r25b
-        ANDROIDAPI: 33
+        ANDROIDNDK: /home/runner/.buildozer/android/platform/android-ndk-r28b
+        ANDROID_NDK_HOME: /home/runner/.buildozer/android/platform/android-ndk-r28b
+        ANDROID_NDK_ROOT: /home/runner/.buildozer/android/platform/android-ndk-r28b
+        ANDROIDAPI: 36
         ANDROIDMINAPI: 21
         MAKEFLAGS: -j2
         CCACHE_DIR: /home/runner/.ccache
@@ -282,10 +354,10 @@ jobs:
         ANDROIDSDK: /usr/local/lib/android/sdk
         ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
         ANDROID_HOME: /usr/local/lib/android/sdk
-        ANDROIDNDK: /home/runner/.buildozer/android/platform/android-ndk-r25b
-        ANDROID_NDK_HOME: /home/runner/.buildozer/android/platform/android-ndk-r25b
-        ANDROID_NDK_ROOT: /home/runner/.buildozer/android/platform/android-ndk-r25b
-        ANDROIDAPI: 33
+        ANDROIDNDK: /home/runner/.buildozer/android/platform/android-ndk-r28b
+        ANDROID_NDK_HOME: /home/runner/.buildozer/android/platform/android-ndk-r28b
+        ANDROID_NDK_ROOT: /home/runner/.buildozer/android/platform/android-ndk-r28b
+        ANDROIDAPI: 36
         ANDROIDMINAPI: 21
         MAKEFLAGS: -j2
         CCACHE_DIR: /home/runner/.ccache
@@ -302,14 +374,20 @@ jobs:
       run: |
         APK_PATH=$(find bin -name "*.apk" -type f | head -n 1)
         SIGNED_APK_PATH="${APK_PATH%-unsigned.apk}-signed.apk"
-        /usr/local/lib/android/sdk/build-tools/33.0.2/apksigner sign \
+        BUILD_TOOLS=$(ls -d /usr/local/lib/android/sdk/build-tools/35.*/ 2>/dev/null | sort -V | tail -1)
+        if [ -z "$BUILD_TOOLS" ]; then
+          echo "ERROR: no build-tools 35+ found; 16 KB zipalign requires it"
+          exit 1
+        fi
+        SIGNER="${BUILD_TOOLS}apksigner"
+        "$SIGNER" sign \
           --ks ghostnet.keystore \
           --ks-pass pass:"${{ secrets.KEYSTORE_PASSWORD }}" \
           --key-pass pass:"${{ secrets.KEY_PASSWORD }}" \
           --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
           --out "$SIGNED_APK_PATH" \
           "$APK_PATH"
-        /usr/local/lib/android/sdk/build-tools/33.0.2/apksigner verify "$SIGNED_APK_PATH"
+        "$SIGNER" verify "$SIGNED_APK_PATH"
         echo "Signed APK: $SIGNED_APK_PATH"
 
     - name: Locate APK
@@ -325,12 +403,36 @@ jobs:
         echo "APK located: $APK_PATH"
         ls -lh "$APK_PATH"
 
+    # ── RELEASE GATE: 16 KB page size ──────────────────────────────────────
+    # Must run BEFORE artifact upload so a non-compliant APK can never be
+    # published. Fails if ANY packaged arm64-v8a native library has a PT_LOAD
+    # alignment below 2**14 (16384), or if APK ZIP alignment is wrong.
+    - name: Audit APK for 16 KB page-size compliance
+      id: audit_16kb
+      env:
+        ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+      run: |
+        set -o pipefail
+        echo "Auditing: ${{ steps.apk_name.outputs.apk_path }}"
+        python3 scripts/check_android_16kb.py "${{ steps.apk_name.outputs.apk_path }}" \
+          | tee 16kb-audit.log
+
+    # ── Upload APK artifact ───────────────────────────────────────────────
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
       with:
         name: gost-net-android-rc1
         path: ${{ steps.apk_name.outputs.apk_path }}
         retention-days: 30
+
+    - name: Upload 16 KB audit log
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: 16kb-audit-${{ github.run_number }}
+        path: 16kb-audit.log
+        retention-days: 30
+        if-no-files-found: ignore
 
     - name: Upload Buildozer log
       if: always()
@@ -361,14 +463,28 @@ jobs:
         echo "| **Run** | ${{ github.run_number }} |" >> $GITHUB_STEP_SUMMARY
         echo "| **Commit** | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
         echo "| **Branch** | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| **Track** | A — Sideload (API 33 / NDK r25b) |" >> $GITHUB_STEP_SUMMARY
+        echo "| **Track** | A — Sideload (API 36 / NDK r28b / 16 KB pages) |" >> $GITHUB_STEP_SUMMARY
+        if [ "${{ steps.audit_16kb.outcome }}" = "success" ]; then
+          echo "| **16 KB Gate** | ✅ PASS |" >> $GITHUB_STEP_SUMMARY
+        elif [ "${{ steps.audit_16kb.outcome }}" = "failure" ]; then
+          echo "| **16 KB Gate** | ❌ FAIL |" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "| **16 KB Gate** | ⏭ not run |" >> $GITHUB_STEP_SUMMARY
+        fi
         if [ -f "${{ steps.apk_name.outputs.apk_path }}" ]; then
           APK_SIZE=$(du -h "${{ steps.apk_name.outputs.apk_path }}" | cut -f1)
           echo "| **APK** | ${{ steps.apk_name.outputs.apk_name }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Size** | $APK_SIZE |" >> $GITHUB_STEP_SUMMARY
+        fi
+        echo "" >> $GITHUB_STEP_SUMMARY
+        # The APK is only ever uploaded when the 16 KB gate passed, so the
+        # summary must key off the gate, not off mere file presence on disk.
+        if [ "${{ steps.audit_16kb.outcome }}" = "success" ]; then
+          echo "✅ **Build successful — 16 KB gate passed, artifact: \`gost-net-android-rc1\`**" >> $GITHUB_STEP_SUMMARY
+        elif [ "${{ steps.audit_16kb.outcome }}" = "failure" ]; then
+          echo "🛑 **16 KB page-size gate FAILED — APK deliberately NOT uploaded.**" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Build successful — artifact: \`gost-net-android-rc1\`**" >> $GITHUB_STEP_SUMMARY
+          echo "See the \`16kb-audit-*\` log artifact for the failing libraries." >> $GITHUB_STEP_SUMMARY
         else
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "❌ **Build failed — check buildozer log artifact**" >> $GITHUB_STEP_SUMMARY
+          echo "❌ **Build failed before the 16 KB gate ran — check buildozer log artifact**" >> $GITHUB_STEP_SUMMARY
         fi

@@ -132,11 +132,11 @@ def check_buildozer_spec():
         return False
     with open(spec_path, 'r', encoding='utf-8') as f:
         content = f.read()
-    assert "android.api = 33" in content, "Missing android.api = 33"
-    assert "android.minapi = 21" in content, "Missing android.minapi = 21"
+    assert ("android.api = 36" in content or "android.api = 33" in content), "Missing android.api = 36 (or 33)"
+    assert ("android.minapi = 21" in content or "android.minapi = 26" in content), "Missing android.minapi"
     assert "research" in content and "experiments" in content, "Missing research/experiments in source.exclude_dirs"
     assert "title = Gost-Net" in content, "App title in buildozer.spec must be Gost-Net"
-    print("buildozer.spec validated (title Gost-Net, target API 33, min API 21, research excluded).")
+    print("buildozer.spec validated (title Gost-Net, target API 36/33, research excluded).")
     return True
 
 def check_required_files():

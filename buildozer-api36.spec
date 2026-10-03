@@ -1,9 +1,10 @@
 # =============================================================================
 # Gost-Net - Buildozer Specification: Modern Android Profile
 # Profile: Android 16 (API 36) Google Play 2026 Target
-# NDK: 27b (27.0.12077973) | Architecture: arm64-v8a
-# Target: 16 KB Memory Page Size Alignment (-Wl,-z,max-page-size=16384)
-# Note: Pending upstream python-for-android 16 KB ELF recipe stabilization
+# NDK: r28b (28.1.13356709) | Architecture: arm64-v8a | minApi: 26
+# 16 KB page size: NDK r28+ links every native object with 2**14 (16384) LOAD
+# alignment by default, so no per-recipe linker hack is required. The release
+# gate is scripts/check_android_16kb.py.
 # =============================================================================
 
 [app]
@@ -35,7 +36,7 @@ android.permissions = INTERNET,ACCESS_NETWORK_STATE,ACCESS_WIFI_STATE,CHANGE_WIF
 # Modern Android 16 Target
 android.api = 36
 android.minapi = 26
-android.ndk = 27b
+android.ndk = 28b
 android.accept_sdk_license = True
 android.enable_androidx = True
 android.manifest.activity_attrs = {"android:windowSoftInputMode": "adjustResize|stateHidden"}
@@ -45,12 +46,20 @@ android.logcat_pid_only = True
 android.archs = arm64-v8a
 android.allow_backup = False
 
-# 16 KB Memory Page Size Alignment Flags for Android 16
-# In NDK r27+, lld defaults to 16 KB alignment for arm64; explicit linker flag passed here:
-p4a.extra_args = --extra-link-args="-Wl,-z,max-page-size=16384"
+# 16 KB Memory Page Alignment
+# NDK r28b is the enforcement point: its LLD 19 defaults every link to
+# -z max-page-size=16384, so no per-recipe linker hack is required.
+# Do NOT add `p4a.extra_args = --extra-link-args=...` here -- p4a parses
+# arguments with parse_known_args() and silently discards unknown flags.
 p4a.log_level = ERROR
 p4a.cython_directives = {"language_level": "3"}
 p4a.release_dir = .buildozer/android/platform/build-{arch}/dist
+# Required: p4a_recipes/ carries the local overrides this build depends on --
+# above all the Kivy recipe, which must shadow upstream under NDK r28/Clang 19.
+# Without this line the r28 build fails to compile Kivy. See
+# p4a_recipes/kivy/__init__.py for why the recipe dir must also vendor upstream's
+# three .patch files.
+p4a.local_recipes = ./p4a_recipes
 android.release_artifact = aab
 
 [buildozer]
