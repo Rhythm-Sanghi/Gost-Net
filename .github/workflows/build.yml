@@ -189,10 +189,24 @@ jobs:
 
     - name: Install Python build dependencies
       run: |
+        set -euo pipefail
         pip install --upgrade pip
-        pip install --upgrade buildozer
+        # Pin buildozer for the same reason p4a is pinned in the spec: an
+        # unpinned `--upgrade buildozer` means the driver that generates the
+        # gradle project, the manifest and the p4a invocation can change
+        # between runs, so the native stack is not reproducible from the
+        # repository. 1.6.0 is the version the qualified APK was built with.
+        pip install --upgrade "buildozer==1.6.0"
         pip install --upgrade "cython==0.29.33"
         pip install -r requirements.txt
+        # Fail loudly if a pin silently fails to take effect, rather than
+        # building with whatever version happened to be resolved.
+        BZ_VER=$(python3 -m pip show buildozer | awk -F': ' '/^Version:/{print $2}')
+        if [ "$BZ_VER" != "1.6.0" ]; then
+          echo "::error title=Pin mismatch::buildozer is pinned to 1.6.0 but resolved to ${BZ_VER}"
+          exit 1
+        fi
+        echo "buildozer pin verified: $BZ_VER"
 
     # Resolve the exact toolchain identity BEFORE any native cache is restored,
     # so the cache key can be bound to it. Two things make that necessary:
@@ -284,7 +298,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/.buildozer/android/platform/build-arm64-v8a
-        key: ${{ runner.os }}-${{ runner.arch }}-native-api36-min21-arm64-v8a-ndk${{ steps.toolchain.outputs.ndk_rev }}-p4a${{ steps.toolchain.outputs.p4a_commit }}-spec${{ hashFiles('buildozer-sideload.spec') }}-req${{ hashFiles('requirements.txt') }}-recipes${{ hashFiles('p4a_recipes/**') }}
+        key: ${{ runner.os }}-${{ runner.arch }}-native-api36-min21-arm64-v8a-ndk${{ steps.toolchain.outputs.ndk_rev }}-p4a${{ steps.toolchain.outputs.p4a_commit }}-bz${{ steps.toolchain.outputs.buildozer_version }}-spec${{ hashFiles('buildozer-sideload.spec') }}-req${{ hashFiles('requirements.txt') }}-recipes${{ hashFiles('p4a_recipes/**') }}
 
     # Explicit, auditable clean-native switch. The hosted runner is already a
     # fresh VM, so this only removes anything the cache step above restored.
@@ -312,9 +326,9 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/.ccache
-        key: ${{ runner.os }}-ccache-ndk${{ steps.toolchain.outputs.ndk_rev }}-p4a${{ steps.toolchain.outputs.p4a_commit }}-${{ hashFiles('buildozer-sideload.spec', 'requirements.txt', 'p4a_recipes/**') }}
+        key: ${{ runner.os }}-ccache-ndk${{ steps.toolchain.outputs.ndk_rev }}-p4a${{ steps.toolchain.outputs.p4a_commit }}-bz${{ steps.toolchain.outputs.buildozer_version }}-${{ hashFiles('buildozer-sideload.spec', 'requirements.txt', 'p4a_recipes/**') }}
         restore-keys: |
-          ${{ runner.os }}-ccache-ndk${{ steps.toolchain.outputs.ndk_rev }}-p4a${{ steps.toolchain.outputs.p4a_commit }}-
+          ${{ runner.os }}-ccache-ndk${{ steps.toolchain.outputs.ndk_rev }}-p4a${{ steps.toolchain.outputs.p4a_commit }}-bz${{ steps.toolchain.outputs.buildozer_version }}-
 
     # ── Use the validated sideload spec (Track A) ──
     - name: Select Track A (sideload) build spec
