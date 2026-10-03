@@ -255,11 +255,31 @@ def _audit_blob(name: str, data: bytes, failures: list, relro_missing: list,
 # --------------------------------------------------------------------------
 # APK audit
 # --------------------------------------------------------------------------
-def find_zipalign() -> str | None:
-    """Locate a zipalign binary, preferring Build-Tools 35+ (needed for -P)."""
+def _build_tools_rank(bt_dir: str) -> tuple[int, ...]:
+    """Rank a build-tools directory by its numeric version.
+
+    Plain string sorting is wrong here: "34.0.0" sorts before "35.0.0" and
+    also before "9.0.0", so the first match is not the newest. A real CI run
+    failed for exactly that reason: the runner had both 34.0.0 and 35.0.0,
+    the lexicographically first one won, and it rejected the -P flag that
+    Build-Tools 35 introduced.
+    """
+    nums = re.findall(r"\d+", os.path.basename(bt_dir))
+    return tuple(int(n) for n in nums) if nums else (0,)
+
+
+def zipalign_candidates() -> list[str]:
+    """Every zipalign we could use, most capable first.
+
+    Order: an explicit $ZIPALIGN, then build-tools directories across every
+    SDK root sorted by descending numeric version, then PATH. Duplicates
+    (the same binary reachable by two paths) are collapsed.
+    """
+    found: list[str] = []
+
     explicit = os.environ.get("ZIPALIGN")
     if explicit and os.path.isfile(explicit):
-        return explicit
+        found.append(explicit)
 
     roots: list[str] = []
     for var in ("ANDROID_SDK_ROOT", "ANDROID_HOME", "ANDROIDSDK"):
@@ -268,31 +288,86 @@ def find_zipalign() -> str | None:
     roots.append(os.path.expanduser("~/.buildozer/android/platform/android-sdk"))
     roots.append("/usr/local/lib/android/sdk")
 
+    ranked: list[tuple[tuple[int, ...], str]] = []
     for root in roots:
-        for bt in sorted(glob.glob(os.path.join(root, "build-tools", "*"))):
+        for bt in glob.glob(os.path.join(root, "build-tools", "*")):
             exe = os.path.join(bt, "zipalign")
-            exe_exe = exe + (".exe" if os.name == "nt" else "")
-            if os.path.isfile(exe_exe):
-                return exe_exe
+            for name in (exe, exe + (".exe" if os.name == "nt" else "")):
+                if os.path.isfile(name):
+                    ranked.append((_build_tools_rank(bt), name))
+                    break
+    for _, exe in sorted(ranked, key=lambda t: t[0], reverse=True):
+        found.append(exe)
 
-    return shutil.which("zipalign")
+    which = shutil.which("zipalign")
+    if which:
+        found.append(which)
+
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for exe in found:
+        real = os.path.realpath(exe)
+        if real not in seen:
+            seen.add(real)
+            ordered.append(exe)
+    return ordered
 
 
-def run_zipalign(apk: str) -> tuple[bool, str]:
-    exe = find_zipalign()
-    if not exe:
-        return False, "zipalign not found (install Android Build-Tools 35+ or set $ZIPALIGN)"
-    try:
-        proc = subprocess.run(
-            [exe, "-c", "-P", "16", "-v", "4", apk],
-            capture_output=True, text=True, timeout=300,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        return False, f"zipalign failed to run: {exc}"
+def find_zipalign() -> str | None:
+    """The highest-versioned zipalign candidate, or None if none exists."""
+    cands = zipalign_candidates()
+    return cands[0] if cands else None
 
-    out = (proc.stdout or "") + (proc.stderr or "")
-    ok = proc.returncode == 0 and "Verification successful" in out
-    return ok, out.strip()
+
+def run_zipalign(apk: str) -> tuple[bool, str, str]:
+    """Run ``zipalign -c -P 16 -v 4`` against each candidate in turn.
+
+    ``-P`` was added in Build-Tools 35, so an older zipalign aborts with
+    "invalid option -- 'P'" instead of reporting on the APK at all. That is
+    not evidence the APK is misaligned, so such binaries are skipped and
+    only a genuine verdict from a capable binary -- or the exhaustion of
+    every candidate -- decides the result.
+
+    Returns ``(ok, output, status)`` where status is one of:
+      "ok"           a capable zipalign ran and passed
+      "misaligned"   a capable zipalign ran and rejected the APK
+      "missing"      no zipalign is installed at all
+      "incompatible" zipalign exists but none supports -P 16
+    """
+    cands = zipalign_candidates()
+    if not cands:
+        return False, ("zipalign not found (install Android Build-Tools 35+ "
+                       "or set $ZIPALIGN)"), "missing"
+
+    rejected: list[str] = []
+    last_output = ""
+    for exe in cands:
+        try:
+            proc = subprocess.run(
+                [exe, "-c", "-P", "16", "-v", "4", apk],
+                capture_output=True, text=True, timeout=300,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            rejected.append(f"{exe}: {exc}")
+            continue
+
+        out = (proc.stdout or "") + (proc.stderr or "")
+        last_output = out.strip()
+
+        if "invalid option" in out or "unknown flag" in out:
+            rejected.append(f"{exe}: too old for -P (Build-Tools 35+ required)")
+            continue
+
+        ok = proc.returncode == 0 and "Verification successful" in out
+        # Either way this is a real verdict from a capable binary.
+        return ok, out.strip(), ("ok" if ok else "misaligned")
+
+    detail = "; ".join(rejected) if rejected else "no usable zipalign"
+    msg = (f"no zipalign supporting '-P 16' could be used ({detail}). "
+           "Install Android Build-Tools 35+.")
+    if last_output:
+        msg += f"\nLast output:\n{last_output}"
+    return False, msg, "incompatible"
 
 
 # --------------------------------------------------------------------------
@@ -433,12 +508,11 @@ def audit_apk(apk: str, strict_relro: bool, allow_missing_zipalign: bool) -> boo
     # --- Packaging gate -----------------------------------------------------
     print()
     print("APK packaging alignment (zipalign -c -P 16 -v 4):")
-    zip_ok, zip_out = run_zipalign(apk)
-    zip_missing = not find_zipalign()
+    zip_ok, zip_out, zip_status = run_zipalign(apk)
     if zip_ok:
         print("    PASS - Verification successful")
-    elif zip_missing and allow_missing_zipalign:
-        print("    SKIP - zipalign not installed; ELF audit still enforced")
+    elif zip_status in ("missing", "incompatible") and allow_missing_zipalign:
+        print(f"    SKIP - {zip_out}; ELF audit still enforced")
     else:
         print(f"    FAIL - {zip_out}")
         tail = zip_out.splitlines()[-6:]
@@ -462,7 +536,10 @@ def audit_apk(apk: str, strict_relro: bool, allow_missing_zipalign: bool) -> boo
 
     # --- Verdict ------------------------------------------------------------
     print()
-    packaging_ok = zip_ok or (zip_missing and allow_missing_zipalign)
+    # A packaging check only counts as satisfied if a capable zipalign
+    # actually passed it, or the operator explicitly opted out of having one.
+    packaging_ok = zip_ok or (zip_status in ("missing", "incompatible")
+                              and allow_missing_zipalign)
     print("=" * 78)
     ok = (not failures and packaging_ok and payload_ok
           and (not strict_relro or not relro_missing))
@@ -472,15 +549,20 @@ def audit_apk(apk: str, strict_relro: bool, allow_missing_zipalign: bool) -> boo
             print("        and APK packaging alignment verified (zipalign -P 16).")
         else:
             # Never claim the ZIP half was verified when it was opted out of.
-            print("        (APK packaging alignment NOT verified: zipalign unavailable")
+            reason = ("zipalign not installed" if zip_status == "missing"
+                      else "no installed zipalign supports -P 16")
+            print(f"        (APK packaging alignment NOT verified: {reason}")
             print("         and --allow-missing-zipalign was given.)")
     else:
         print("RESULT: FAIL")
         if failures:
             print(f"        {len(failures)} library(ies) failed the ELF 16 KB test.")
         if not zip_ok:
-            if zip_missing:
+            if zip_status == "missing":
                 print("        APK ZIP alignment could not be verified: zipalign not found.")
+            elif zip_status == "incompatible":
+                print("        APK ZIP alignment could not be verified: no installed "
+                      "zipalign supports -P 16 (Build-Tools 35+ required).")
             else:
                 print("        APK ZIP alignment verification failed.")
         if not payload_ok:

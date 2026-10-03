@@ -310,7 +310,19 @@ jobs:
     # driver-injected -z max-page-size, so an r25-era object can never satisfy
     # an r28 compile. It is restored immediately below regardless.
     - name: Clean native build state
-      if: ${{ inputs.clean_native != false }}
+      # Written out longhand on purpose, because the obvious expression is
+      # wrong in both directions. On push/pull_request events
+      # `inputs.clean_native` is null, and GitHub coerces any cross-type
+      # comparison to Number (null -> 0, false -> 0), so:
+      #   inputs.clean_native != false  ->  0 != 0  ->  false
+      # ran #70 reported this step as *skipped* on a push, i.e. exactly where
+      # a clean build matters most. Testing the other way round is no better:
+      #   inputs.clean_native == null   ->  0 == 0  ->  true
+      # which would also fire when someone explicitly passes false.
+      # So gate on the event name instead: `inputs` is only populated for
+      # workflow_dispatch, so on an automatic run we never compare it against
+      # a literal at all, and on a manual run we use the Boolean directly.
+      if: ${{ github.event_name != 'workflow_dispatch' || inputs.clean_native }}
       run: |
         set -euo pipefail
         echo "### removing any restored native build state ###"
@@ -449,6 +461,19 @@ jobs:
       run: |
         set -o pipefail
         echo "Auditing: ${{ steps.apk_name.outputs.apk_path }}"
+        # Resolve a zipalign that actually supports "-P 16" (Build-Tools 35+)
+        # and hand it to the gate explicitly. Run #70 failed here because the
+        # gate's own discovery preferred build-tools 34.0.0 over 35.0.0, and
+        # 34 rejects the -P flag outright. `sort -V` is a version sort, so
+        # 35.0.0 wins over 34.0.0 here.
+        ZIPALIGN_BIN=$(ls -d "${ANDROID_SDK_ROOT}"/build-tools/*/zipalign 2>/dev/null \
+                       | sort -V | tail -1)
+        if [ -n "$ZIPALIGN_BIN" ]; then
+          echo "Using zipalign: $ZIPALIGN_BIN"
+          echo "ZIPALIGN=$ZIPALIGN_BIN" >> $GITHUB_ENV
+        else
+          echo "::warning title=zipalign unresolved::no zipalign found under ${ANDROID_SDK_ROOT}/build-tools; the gate will report packaging alignment as unverified."
+        fi
         # Publish the hash of the exact bytes being audited, so the downloaded
         # artifact can be verified against it without trusting this workflow.
         sha256sum "${{ steps.apk_name.outputs.apk_path }}" | tee apk.sha256
