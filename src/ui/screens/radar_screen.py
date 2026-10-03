@@ -57,21 +57,27 @@ class RadarScreen(MDScreen):
         
         layout = MDBoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15), size_hint=(1, 1))
         
-        # Header with title and settings button - modern minimal style
+        # Responsive header with status and actions
         header = MDBoxLayout(
+            orientation='vertical',
+            size_hint_y=None,
+            height=dp(80),
+            spacing=dp(4),
+            padding=[dp(4), dp(4), dp(4), dp(4)]
+        )
+        
+        top_row = MDBoxLayout(
             orientation='horizontal',
             size_hint_y=None,
-            height=dp(60),
-            spacing=dp(10)
+            height=dp(36),
+            spacing=dp(8)
         )
         
         title = MDLabel(
-            text="Ghost Net",
+            text="Gost-Net",
             halign='left',
             font_style='Headline',
             role='medium',
-            size_hint_x=None,
-            width=dp(150),
             pos_hint={'center_y': 0.5}
         )
         title.bind(on_touch_down=self.on_title_tap)
@@ -85,26 +91,26 @@ class RadarScreen(MDScreen):
             role='small',
             theme_text_color='Secondary',
             size_hint_x=None,
-            width=dp(100),
+            width=dp(130),
             pos_hint={'center_y': 0.5}
         )
         
-        settings_btn = MDIconButton(
-            icon='cog',
-            theme_icon_color='Custom',
-            icon_color=(0.65, 0.79, 0.92, 1),
-            size_hint_x=None,
-            width=dp(48),
-            pos_hint={'center_y': 0.5}
+        top_row.add_widget(title)
+        top_row.add_widget(self.network_badge)
+        header.add_widget(top_row)
+        
+        action_row = MDBoxLayout(
+            orientation='horizontal',
+            size_hint_y=None,
+            height=dp(40),
+            spacing=dp(4)
         )
-        settings_btn.bind(on_release=self.open_settings)
         
         map_btn = MDIconButton(
             icon='map',
             theme_icon_color='Custom',
             icon_color=(0.65, 0.79, 0.92, 1),
-            size_hint_x=None,
-            width=dp(48),
+            size_hint_x=0.25,
             pos_hint={'center_y': 0.5}
         )
         map_btn.bind(on_release=self.open_map)
@@ -113,8 +119,7 @@ class RadarScreen(MDScreen):
             icon='note-text',
             theme_icon_color='Custom',
             icon_color=(0.65, 0.79, 0.92, 1),
-            size_hint_x=None,
-            width=dp(48),
+            size_hint_x=0.25,
             pos_hint={'center_y': 0.5}
         )
         notes_btn.bind(on_release=self.open_notes)
@@ -123,31 +128,36 @@ class RadarScreen(MDScreen):
             icon='chart-timeline-variant',
             theme_icon_color='Custom',
             icon_color=(0.65, 0.79, 0.92, 1),
-            size_hint_x=None,
-            width=dp(48),
+            size_hint_x=0.25,
             pos_hint={'center_y': 0.5}
         )
         diag_btn.bind(on_release=self.open_diagnostics)
         
-        header.add_widget(title)
-        header.add_widget(Widget(size_hint_x=1)) # Spacer to push buttons to the right
-        header.add_widget(self.network_badge)
-        header.add_widget(map_btn)
-        header.add_widget(notes_btn)
-        header.add_widget(diag_btn)
-        header.add_widget(settings_btn)
+        settings_btn = MDIconButton(
+            icon='cog',
+            theme_icon_color='Custom',
+            icon_color=(0.65, 0.79, 0.92, 1),
+            size_hint_x=0.25,
+            pos_hint={'center_y': 0.5}
+        )
+        settings_btn.bind(on_release=self.open_settings)
+        
+        action_row.add_widget(map_btn)
+        action_row.add_widget(notes_btn)
+        action_row.add_widget(diag_btn)
+        action_row.add_widget(settings_btn)
+        header.add_widget(action_row)
         layout.add_widget(header)
         
-        # Centered body container for minimal layout
+        # Responsive body container
         body_container = MDBoxLayout(
             orientation='vertical',
-            spacing=dp(15),
-            size_hint=(None, 1),
-            width=dp(500),
+            spacing=dp(8),
+            size_hint=(1, 1),
             pos_hint={'center_x': 0.5}
         )
         
-        self.radar = RadarWidget(size_hint=(1, 0.4))
+        self.radar = RadarWidget(size_hint=(1, 0.35))
         body_container.add_widget(self.radar)
         
         self.status_label = MDLabel(
@@ -223,11 +233,14 @@ class RadarScreen(MDScreen):
         
         self.current_tab = 'active'
         self.peers_scroll.opacity = 1
+        self.peers_scroll.size_hint_y = 1
         self.saved_peers_scroll.opacity = 0
+        self.saved_peers_scroll.size_hint_y = 0
+        self.saved_peers_scroll.height = 0
         self.update_tab_buttons()
         
-        # Only add the active tab scroll view initially
         tabs_layout.add_widget(self.peers_scroll)
+        tabs_layout.add_widget(self.saved_peers_scroll)
         body_container.add_widget(tabs_layout)
         
         layout.add_widget(body_container)
@@ -350,10 +363,8 @@ class RadarScreen(MDScreen):
             elapsed = max(0, int(time.time() - last_seen_ts))
             seen_str = "just now" if elapsed < 5 else f"{elapsed}s ago"
 
-            item_height = dp(68)
             route_text = None
             if visible_peers and len(visible_peers) > 0:
-                item_height = dp(84)
                 if len(visible_peers) == 1:
                     route_text = f"Route: via {visible_peers[0][:8]}... (1 hop)"
                 else:
@@ -363,8 +374,8 @@ class RadarScreen(MDScreen):
                 orientation='horizontal',
                 spacing=dp(10),
                 size_hint_y=None,
-                height=item_height,
-                padding=[dp(12), dp(8), dp(12), dp(8)]
+                adaptive_height=True,
+                padding=[dp(12), dp(10), dp(12), dp(10)]
             )
             
             with item.canvas.after:
@@ -375,8 +386,7 @@ class RadarScreen(MDScreen):
                 inst.divider_line.points = [inst.x, inst.y, inst.x + inst.width, inst.y]
             item.bind(pos=_update_div, size=_update_div)
             
-            peer_info = MDBoxLayout(orientation='vertical', size_hint_x=0.78, spacing=dp(2))
-            name_row = MDBoxLayout(orientation='horizontal', adaptive_height=True, spacing=dp(6))
+            peer_info = MDBoxLayout(orientation='vertical', size_hint_x=0.74, spacing=dp(2), adaptive_height=True)
             peer_name = MDLabel(
                 text=username,
                 font_style='Title',
@@ -384,17 +394,23 @@ class RadarScreen(MDScreen):
                 theme_text_color='Primary',
                 adaptive_height=True
             )
-            name_row.add_widget(peer_name)
-
-            peer_meta = MDLabel(
-                text=f"{ip} • {transport_label} • {verif_badge} • {seen_str}",
+            peer_badge = MDLabel(
+                text=f"{verif_badge} • {transport_label}",
                 font_style='Body',
                 role='small',
                 theme_text_color='Custom' if key_mismatch else 'Secondary',
-                text_color=(1, 0.45, 0.45, 1) if key_mismatch else (0.6, 0.7, 0.8, 1),
+                text_color=(1, 0.45, 0.45, 1) if key_mismatch else (0.65, 0.79, 0.92, 1),
                 adaptive_height=True
             )
-            peer_info.add_widget(name_row)
+            peer_meta = MDLabel(
+                text=f"{ip} • Seen {seen_str}",
+                font_style='Body',
+                role='small',
+                theme_text_color='Secondary',
+                adaptive_height=True
+            )
+            peer_info.add_widget(peer_name)
+            peer_info.add_widget(peer_badge)
             peer_info.add_widget(peer_meta)
             
             if route_text:
@@ -408,24 +424,20 @@ class RadarScreen(MDScreen):
                 peer_info.add_widget(route_label)
             
             chat_btn = MDButton(
-                style='text',
-                size_hint_x=0.22,
+                style='filled',
+                size_hint_x=0.26,
+                size_hint_y=None,
+                height=dp(44),
+                theme_bg_color='Custom',
+                md_bg_color=(0.18, 0.24, 0.35, 0.9),
                 pos_hint={'center_y': 0.5}
             )
             chat_btn_text = MDButtonText(text="Chat")
             chat_btn_text.theme_text_color = 'Custom'
-            chat_btn_text.text_color = (0.65, 0.79, 0.92, 1) # Ice-Blue
+            chat_btn_text.text_color = (0.65, 0.79, 0.92, 1)
             chat_btn.add_widget(chat_btn_text)
             chat_btn.bind(on_release=lambda x, p_ip=ip, p_name=username: self.open_chat(p_ip, p_name))
             
-            # Enable row tapping
-            def _on_row_touch(inst, touch, p_ip=ip, p_name=username):
-                if inst.collide_point(*touch.pos):
-                    self.open_chat(p_ip, p_name)
-                    return True
-                return False
-            peer_info.bind(on_touch_down=_on_row_touch)
-
             item.add_widget(peer_info)
             item.add_widget(chat_btn)
             self.peers_list.add_widget(item)
@@ -463,50 +475,51 @@ class RadarScreen(MDScreen):
             self.unlock_diagnostics()
     
     def unlock_diagnostics(self):
-        app = MDApp.get_running_app()
-        if app and app.root:
-            try:
-                diag_screen = app.root.get_screen('diagnostics')
-            except:
-                diag_screen = None
-            
-            if not diag_screen:
-                from ui.screens.diagnostics_screen import DiagnosticsScreen
-                diag_screen = DiagnosticsScreen()
-                app.root.add_widget(diag_screen)
-            
-            app.root.current = 'diagnostics'
+        from ui.navigation import get_navigation_controller
+        get_navigation_controller().navigate_to('diagnostics')
+    
+    def open_diagnostics(self, *args):
+        from ui.navigation import get_navigation_controller
+        get_navigation_controller().navigate_to('diagnostics')
     
     def open_settings(self, *args):
-        app = MDApp.get_running_app()
-        app.root.current = 'settings'
+        from ui.navigation import get_navigation_controller
+        get_navigation_controller().navigate_to('settings')
     
     def open_map(self, *args):
-        """Open offline map."""
-        app = MDApp.get_running_app()
-        if MAPVIEW_AVAILABLE:
-            app.root.current = 'map'
-        else:
-            print("[RadarScreen] MapView not available")
+        from ui.navigation import get_navigation_controller
+        get_navigation_controller().navigate_to('map')
             
     def open_notes(self, *args):
-        """Navigate to collaborative notes screen."""
-        app = MDApp.get_running_app()
-        app.root.current = 'notes'
+        from ui.navigation import get_navigation_controller
+        get_navigation_controller().navigate_to('notes')
+    
+    def handle_back(self) -> bool:
+        """Handle screen-level Back key."""
+        if self.current_tab == 'saved':
+            self.show_active_peers()
+            return True
+        return False
+        
+    def show_exit_notice(self, text: str):
+        """Show deliberate exit confirmation message on root screen."""
+        original = self.status_label.text
+        def reset(dt):
+            if self.status_label.text == text:
+                self.status_label.text = original
+        self.status_label.text = text
+        Clock.schedule_once(reset, 2.5)
     
     def show_active_peers(self, *args):
         """Switch to active peers tab."""
         if self.current_tab == 'active':
             return
         self.current_tab = 'active'
-        
-        # Dynamically swap scroll views in the layout to ensure correct size allocation
-        if self.saved_peers_scroll in self.tabs_layout.children:
-            self.tabs_layout.remove_widget(self.saved_peers_scroll)
-        if self.peers_scroll not in self.tabs_layout.children:
-            self.tabs_layout.add_widget(self.peers_scroll)
-            
         self.peers_scroll.opacity = 1
+        self.peers_scroll.size_hint_y = 1
+        self.saved_peers_scroll.opacity = 0
+        self.saved_peers_scroll.size_hint_y = 0
+        self.saved_peers_scroll.height = 0
         self.update_tab_buttons()
      
     def show_saved_peers(self, *args):
@@ -514,14 +527,11 @@ class RadarScreen(MDScreen):
         if self.current_tab == 'saved':
             return
         self.current_tab = 'saved'
-        
-        # Dynamically swap scroll views in the layout to ensure correct size allocation
-        if self.peers_scroll in self.tabs_layout.children:
-            self.tabs_layout.remove_widget(self.peers_scroll)
-        if self.saved_peers_scroll not in self.tabs_layout.children:
-            self.tabs_layout.add_widget(self.saved_peers_scroll)
-            
+        self.peers_scroll.opacity = 0
+        self.peers_scroll.size_hint_y = 0
+        self.peers_scroll.height = 0
         self.saved_peers_scroll.opacity = 1
+        self.saved_peers_scroll.size_hint_y = 1
         self.update_tab_buttons()
         self.load_saved_peers()
 

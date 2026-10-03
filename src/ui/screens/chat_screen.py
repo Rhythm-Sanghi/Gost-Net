@@ -86,7 +86,9 @@ class ChatScreen(MDScreen):
             font_style='Headline',
             role='small',
             theme_text_color='Primary',
-            pos_hint={'center_y': 0.5}
+            pos_hint={'center_y': 0.5},
+            shorten=True,
+            shorten_from='right'
         )
         
         self.ttl_label = MDLabel(
@@ -151,8 +153,7 @@ class ChatScreen(MDScreen):
         # Centered chat container for minimal/modern feel
         self.chat_container = MDBoxLayout(
             orientation='vertical',
-            size_hint=(None, 1),
-            width=dp(600),
+            size_hint=(1, 1),
             pos_hint={'center_x': 0.5},
             spacing=dp(10)
         )
@@ -1062,6 +1063,6 @@ class ChatScreen(MDScreen):
         Clock.schedule_once(lambda dt: self._scroll_to_bottom(), 0.1)
     
     def go_back(self, *args):
-        """Return to radar screen."""
-        app = MDApp.get_running_app()
-        app.root.current = 'radar'
+        """Return to previous screen via NavigationController."""
+        from ui.navigation import get_navigation_controller
+        get_navigation_controller().go_back()

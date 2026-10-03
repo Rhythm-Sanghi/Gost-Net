@@ -186,12 +186,22 @@ class GhostNetApp(MDApp):
         sm.add_widget(ChatScreen())
         sm.add_widget(SettingsScreen())
         sm.add_widget(NotesScreen())
-        if MAPVIEW_AVAILABLE:
-            sm.add_widget(MapScreen())
+        sm.add_widget(MapScreen())
         
         sm.current = 'lock'
         
+        from ui.navigation import get_navigation_controller
+        get_navigation_controller().setup_window_hooks()
+        
         return sm
+    
+    def navigate_to(self, screen_name, direction='left'):
+        from ui.navigation import get_navigation_controller
+        get_navigation_controller().navigate_to(screen_name, direction=direction)
+
+    def go_back(self, direction='right'):
+        from ui.navigation import get_navigation_controller
+        return get_navigation_controller().go_back(direction=direction)
     
     def on_start(self):
         """Called when the app starts - now with async boot sequence."""

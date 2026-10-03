@@ -105,6 +105,24 @@ try:
     
     try:
         from kivymd.uix.dialog import MDDialog, MDDialogHeadlineText, MDDialogContentContainer, MDDialogButtonContainer
+        _orig_dialog_open = MDDialog.open
+        _orig_dialog_dismiss = MDDialog.dismiss
+        def _tracked_dialog_open(self, *args, **kwargs):
+            try:
+                from ui.navigation import get_navigation_controller
+                get_navigation_controller().register_dialog(self)
+            except Exception:
+                pass
+            return _orig_dialog_open(self, *args, **kwargs)
+        def _tracked_dialog_dismiss(self, *args, **kwargs):
+            try:
+                from ui.navigation import get_navigation_controller
+                get_navigation_controller().unregister_dialog(self)
+            except Exception:
+                pass
+            return _orig_dialog_dismiss(self, *args, **kwargs)
+        MDDialog.open = _tracked_dialog_open
+        MDDialog.dismiss = _tracked_dialog_dismiss
     except ImportError:
         MDDialog = _DummyDialog
         MDDialogHeadlineText = MDLabel

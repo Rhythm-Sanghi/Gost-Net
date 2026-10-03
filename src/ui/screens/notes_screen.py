@@ -31,8 +31,7 @@ class NotesScreen(MDScreen):
             orientation='vertical',
             padding=dp(20),
             spacing=dp(10),
-            size_hint=(None, 1),
-            width=dp(600),
+            size_hint=(1, 1),
             pos_hint={'center_x': 0.5}
         )
         
@@ -155,5 +154,5 @@ class NotesScreen(MDScreen):
         self.status_label.text = f"Synced notes with {synced_count} direct peer(s)."
                     
     def go_back(self, *args):
-        app = MDApp.get_running_app()
-        app.root.current = 'radar'
+        from ui.navigation import get_navigation_controller
+        get_navigation_controller().go_back()

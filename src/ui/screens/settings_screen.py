@@ -76,10 +76,9 @@ class SettingsScreen(MDScreen):
         header.add_widget(title)
         layout.add_widget(header)
         
-        # Scrollable settings content - centered and capped to 600dp
+        # Scrollable settings content
         scroll = MDScrollView(
-            size_hint=(None, 1),
-            width=dp(600),
+            size_hint=(1, 1),
             pos_hint={'center_x': 0.5}
         )
         settings_content = MDBoxLayout(
@@ -1138,6 +1137,6 @@ class SettingsScreen(MDScreen):
         sys.exit(0)
     
     def go_back(self, *args):
-        """Return to radar screen."""
-        app = MDApp.get_running_app()
-        app.root.current = 'radar'
+        """Return to previous screen via NavigationController."""
+        from ui.navigation import get_navigation_controller
+        get_navigation_controller().go_back()

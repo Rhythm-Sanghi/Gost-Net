@@ -43,6 +43,14 @@ except ImportError:
         print("[MapScreen] MapView not available - map disabled")
 
 if MAPVIEW_AVAILABLE and MapSource:
+    class BlankOfflineMapSource(MapSource):
+        """Offline-only blank map provider that suppresses external network requests."""
+        def __init__(self, **kwargs):
+            super().__init__(min_zoom=0, max_zoom=19, **kwargs)
+            
+        def fill_tile(self, tile):
+            tile.state = "done"
+
     class OfflineMBTilesMapSource(MapSource):
         def __init__(self, mbtiles_path, **kwargs):
             self.mbtiles_path = mbtiles_path
@@ -100,6 +108,10 @@ if MAPVIEW_AVAILABLE and MapSource:
             # Offline opsec enforcement: do NOT fallback to internet tile fetching
             tile.state = "done"
 else:
+    class BlankOfflineMapSource(object):
+        def __init__(self, **kwargs):
+            pass
+
     class OfflineMBTilesMapSource(object):
         def __init__(self, mbtiles_path, **kwargs):
             pass
@@ -209,20 +221,53 @@ class MapScreen(MDScreen):
                 lon=75.8577,
                 size_hint=(1, 0.85)
             )
-            
+            if BlankOfflineMapSource:
+                self.map_view.map_source = BlankOfflineMapSource()
             self.map_view.map_source.cache_size = 500
             self.map_view.map_source.cache = True
             
             self.init_user_marker()
-            
             layout.add_widget(self.map_view)
         else:
-            fallback_label = MDLabel(
-                text='MapView unavailable - install kivy_garden.mapview',
-                halign='center',
-                theme_text_color='Secondary'
+            fallback_card = MDCard(
+                orientation='vertical',
+                style='outlined',
+                padding=dp(20),
+                spacing=dp(12),
+                size_hint=(1, 0.85),
+                pos_hint={'center_x': 0.5},
+                md_bg_color=(0.10, 0.12, 0.18, 0.85),
+                line_color=(0.25, 0.35, 0.50, 0.6)
             )
-            layout.add_widget(fallback_label)
+            fallback_title = MDLabel(
+                text="Field Coordinates (Offline Sensor Mode)",
+                font_style="Title",
+                role="medium",
+                theme_text_color="Primary",
+                size_hint_y=None,
+                height=dp(30)
+            )
+            self.fallback_coords_label = MDLabel(
+                text="GPS Coordinates: Acquiring...",
+                font_style="Headline",
+                role="small",
+                theme_text_color="Custom",
+                text_color=(0.4, 0.8, 1.0, 1),
+                size_hint_y=None,
+                height=dp(40)
+            )
+            fallback_desc = MDLabel(
+                text="Local coordinate tracking, SOS beacons, and waypoint broadcasts remain active.\nInteractive visual tile mapping requires kivy-garden.mapview and an offline MBTiles file configured in Settings.",
+                font_style="Body",
+                role="medium",
+                theme_text_color="Secondary",
+                size_hint_y=None,
+                height=dp(80)
+            )
+            fallback_card.add_widget(fallback_title)
+            fallback_card.add_widget(self.fallback_coords_label)
+            fallback_card.add_widget(fallback_desc)
+            layout.add_widget(fallback_card)
         
         info_box = MDBoxLayout(
             orientation='vertical',
@@ -270,6 +315,7 @@ class MapScreen(MDScreen):
         if not self.map_view:
             return
         app = MDApp.get_running_app()
+        mbtiles_loaded = False
         if app and app.config:
             mbtiles_path = app.config.get("mbtiles_path")
             if mbtiles_path and os.path.exists(mbtiles_path):
@@ -277,11 +323,15 @@ class MapScreen(MDScreen):
                     print(f"[MapScreen] Setting map source to offline database: {mbtiles_path}")
                     offline_source = OfflineMBTilesMapSource(mbtiles_path)
                     self.map_view.map_source = offline_source
+                    mbtiles_loaded = True
                 except Exception as e:
                     print(f"[MapScreen] Failed to set offline map source: {e}")
-            else:
-                if hasattr(self, 'info_label') and self.info_label:
-                    self.info_label.text = "GPS Active • Offline MBTiles not configured (select in Settings)"
+        
+        if not mbtiles_loaded:
+            if BlankOfflineMapSource:
+                self.map_view.map_source = BlankOfflineMapSource()
+            if hasattr(self, 'info_label') and self.info_label:
+                self.info_label.text = "GPS Active • Offline MBTiles not configured (select in Settings)"
 
     def init_user_marker(self):
         if not MAPVIEW_AVAILABLE or not self.map_view or not MapMarker:
@@ -310,21 +360,21 @@ class MapScreen(MDScreen):
             print(f"[MapScreen] Error re-centering on user: {e}")
 
     def update_user_location(self, dt):
-        if not self.map_view or not self.user_marker:
-            return
-        
         try:
             lat, lon = self.gps_manager.get_coordinates()
+            if hasattr(self, 'info_label') and self.info_label:
+                self.info_label.text = f'Your location: {lat:.4f}, {lon:.4f}'
+            if hasattr(self, 'fallback_coords_label') and self.fallback_coords_label:
+                self.fallback_coords_label.text = f'GPS Coordinates: {lat:.6f}, {lon:.6f}'
             
-            self.user_marker.lat = lat
-            self.user_marker.lon = lon
-            
-            # Center only once initially so user panning/zooming is not disrupted
-            if not getattr(self, '_has_initially_centered', False):
-                self.map_view.center_on(lat, lon)
-                self._has_initially_centered = True
-            
-            self.info_label.text = f'Your location: {lat:.4f}, {lon:.4f}'
+            if self.map_view and self.user_marker:
+                self.user_marker.lat = lat
+                self.user_marker.lon = lon
+                
+                # Center only once initially so user panning/zooming is not disrupted
+                if not getattr(self, '_has_initially_centered', False):
+                    self.map_view.center_on(lat, lon)
+                    self._has_initially_centered = True
         except Exception as e:
             print(f'[MapScreen] Location update error: {e}')
     
@@ -556,5 +606,5 @@ class MapScreen(MDScreen):
         return ""
 
     def go_back(self, *args):
-        app = MDApp.get_running_app()
-        app.root.current = 'radar'
+        from ui.navigation import get_navigation_controller
+        get_navigation_controller().go_back()

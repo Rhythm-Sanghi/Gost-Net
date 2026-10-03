@@ -41,8 +41,7 @@ class DiagnosticsScreen(MDScreen):
             orientation='vertical',
             padding=dp(10),
             spacing=dp(10),
-            size_hint=(None, 1),
-            width=dp(600),
+            size_hint=(1, 1),
             pos_hint={'center_x': 0.5}
         )
         
@@ -358,6 +357,5 @@ class DiagnosticsScreen(MDScreen):
         clear_thread.start()
     
     def close_diagnostics(self, instance=None):
-        app = MDApp.get_running_app()
-        if app and app.root:
-            app.root.current = 'radar'
+        from ui.navigation import get_navigation_controller
+        get_navigation_controller().go_back()
