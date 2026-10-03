@@ -175,9 +175,28 @@ jobs:
           "platforms;android-33" \
           "build-tools;35.0.0" || true
 
-    # Resolve the exact toolchain identity BEFORE any cache is restored, so the
-    # cache key can be bound to it. Section 18 of the qualification requires the
-    # NDK revision and the python-for-android build to participate in the key;
+    # pip cache first, then the build dependencies themselves: the step below
+    # (Resolve native toolchain identity) reads the installed python-for-android
+    # version in order to build the native cache key, so p4a has to exist before
+    # it runs.
+    - name: Cache pip
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install Python build dependencies
+      run: |
+        pip install --upgrade pip
+        pip install --upgrade buildozer
+        pip install --upgrade "cython==0.29.33"
+        pip install -r requirements.txt
+
+    # Resolve the exact toolchain identity BEFORE any native cache is restored,
+    # so the cache key can be bound to it. The qualification requires the NDK
+    # revision and the python-for-android build to participate in that key:
     # otherwise an r25-era or otherwise different p4a build can silently satisfy
     # an r28 build and ship 4 KB-aligned objects.
     - name: Resolve native toolchain identity
@@ -270,16 +289,10 @@ jobs:
         mkdir -p ~/.buildozer/android/platform
         echo "clean native state: $(ls -A ~/.buildozer/android/platform 2>/dev/null | tr '\n' ' ' || echo empty)"
 
-    - name: Cache pip
-      uses: actions/cache@v4
-      with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
-
-    # ccache is safe to share across NDK revisions because object files are
-    # keyed by the preprocessor command line, which embeds the compiler path.
+    # ccache is restored after the clean step so it is available to the build.
+    # It is safe to share across NDK revisions because it is content-addressed on
+    # the preprocessor command line, which embeds both the compiler path and the
+    # driver-injected -z max-page-size.
     - name: Cache ccache
       uses: actions/cache@v4
       with:
@@ -287,13 +300,6 @@ jobs:
         key: ${{ runner.os }}-ccache-ndk${{ steps.toolchain.outputs.ndk_rev }}-p4a${{ steps.toolchain.outputs.p4a_version }}-${{ hashFiles('buildozer-sideload.spec', 'requirements.txt', 'p4a_recipes/**') }}
         restore-keys: |
           ${{ runner.os }}-ccache-ndk${{ steps.toolchain.outputs.ndk_rev }}-p4a${{ steps.toolchain.outputs.p4a_version }}-
-
-    - name: Install Python build dependencies
-      run: |
-        pip install --upgrade pip
-        pip install --upgrade buildozer
-        pip install --upgrade "cython==0.29.33"
-        pip install -r requirements.txt
 
     # ── Use the validated sideload spec (Track A) ──
     - name: Select Track A (sideload) build spec
@@ -414,23 +420,32 @@ jobs:
       run: |
         set -o pipefail
         echo "Auditing: ${{ steps.apk_name.outputs.apk_path }}"
+        # Publish the hash of the exact bytes being audited, so the downloaded
+        # artifact can be verified against it without trusting this workflow.
+        sha256sum "${{ steps.apk_name.outputs.apk_path }}" | tee apk.sha256
         python3 scripts/check_android_16kb.py "${{ steps.apk_name.outputs.apk_path }}" \
           | tee 16kb-audit.log
 
     # ── Upload APK artifact ───────────────────────────────────────────────
+    # No `if: always()`: a failed audit gate must stop the APK from being
+    # published at all. The name is deliberately neutral and run-unique --
+    # an artifact is a CI output, not a release candidate, so it must not
+    # claim "rc2" before that tag actually exists.
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
       with:
-        name: gost-net-android-rc1
+        name: gost-net-android-ci-${{ github.run_number }}
         path: ${{ steps.apk_name.outputs.apk_path }}
         retention-days: 30
 
-    - name: Upload 16 KB audit log
+    - name: Upload 16 KB audit log and APK SHA-256
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: 16kb-audit-${{ github.run_number }}
-        path: 16kb-audit.log
+        path: |
+          16kb-audit.log
+          apk.sha256
         retention-days: 30
         if-no-files-found: ignore
 
@@ -480,7 +495,9 @@ jobs:
         # The APK is only ever uploaded when the 16 KB gate passed, so the
         # summary must key off the gate, not off mere file presence on disk.
         if [ "${{ steps.audit_16kb.outcome }}" = "success" ]; then
-          echo "✅ **Build successful — 16 KB gate passed, artifact: \`gost-net-android-rc1\`**" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Build successful — 16 KB gate passed, artifact: \`gost-net-android-ci-${{ github.run_number }}\`**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| **APK SHA-256** | \`$(cut -d' ' -f1 apk.sha256 2>/dev/null || echo unavailable)\` |" >> $GITHUB_STEP_SUMMARY
         elif [ "${{ steps.audit_16kb.outcome }}" = "failure" ]; then
           echo "🛑 **16 KB page-size gate FAILED — APK deliberately NOT uploaded.**" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
