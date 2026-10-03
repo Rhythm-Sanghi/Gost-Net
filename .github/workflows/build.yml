@@ -195,33 +195,48 @@ jobs:
         pip install -r requirements.txt
 
     # Resolve the exact toolchain identity BEFORE any native cache is restored,
-    # so the cache key can be bound to it. The qualification requires the NDK
-    # revision and the python-for-android build to participate in that key:
-    # otherwise an r25-era or otherwise different p4a build can silently satisfy
-    # an r28 build and ship 4 KB-aligned objects.
+    # so the cache key can be bound to it. Two things make that necessary:
+    #
+    #   * the NDK revision, because r25b and r28b produce different LOAD
+    #     alignment from identical sources, so an r25-era cache entry must
+    #     never satisfy an r28 build;
+    #   * the python-for-android revision, because buildozer does NOT install
+    #     p4a from PyPI. It git-clones kivy/python-for-android -b master into
+    #     the platform dir and runs `python -m pythonforandroid.toolchain`
+    #     with that directory on sys.path. Asking pip for its version measures
+    #     a different, unrelated installation, so the revision is read from
+    #     the p4a.commit pin in the build spec instead.
+    #
+    # This step never fails the job: it only reports identity. If it cannot
+    # determine something, the cache key degrades to a coarser discriminator
+    # rather than blocking the build, because the mandatory gate is
+    # scripts/check_android_16kb.py, not this bookkeeping.
     - name: Resolve native toolchain identity
       id: toolchain
       run: |
-        set -euo pipefail
+        set -uo pipefail
         NDK_REV=28.1.13356709
-        P4A_VER=$(python3 -m pip show python-for-android 2>/dev/null \
-                  | awk -F': ' '/^Version:/{print $2}')
         BUILD0ZER_VER=$(python3 -m pip show buildozer 2>/dev/null \
-                  | awk -F': ' '/^Version:/{print $2}')
-        if [ -z "$P4A_VER" ]; then
-          echo "ERROR: python-for-android is not importable; cannot pin the cache key."
-          exit 1
+                        | awk -F': ' '/^Version:/{print $2}' || true)
+        # The spec is the source of truth: it is what pins the revision.
+        P4A_COMMIT=$(grep -E '^p4a\.commit' buildozer.spec | head -1 \
+                     | cut -d= -f2 | tr -d '[:space:]' || true)
+        if [ -z "$P4A_COMMIT" ] || [ "$P4A_COMMIT" = "HEAD" ]; then
+          echo "::warning title=Unpinned python-for-android::buildozer.spec does not pin p4a.commit; the native stack is not reproducible and the cache key cannot discriminate p4a revisions."
+          P4A_COMMIT="UNPINNED-$(date -u +%Y%m%d%H%M)"
         fi
-        echo "ndk_rev=$NDK_REV"                >> $GITHUB_OUTPUT
-        echo "p4a_version=${P4A_VER}"          >> $GITHUB_OUTPUT
+        echo "ndk_rev=$NDK_REV"                        >> $GITHUB_OUTPUT
+        echo "p4a_commit=${P4A_COMMIT:0:12}"           >> $GITHUB_OUTPUT
         echo "buildozer_version=${BUILD0ZER_VER:-unknown}" >> $GITHUB_OUTPUT
         {
           echo "### native build identity ###"
-          echo "NDK              : r${NDK_REV}"
-          echo "python-for-android: ${P4A_VER}"
-          echo "buildozer        : ${BUILD0ZER_VER:-unknown}"
-          echo "target API / min : 36 / 21"
-          echo "arch             : arm64-v8a"
+          echo "| item | value |"
+          echo "| --- | --- |"
+          echo "| NDK | r${NDK_REV} |"
+          echo "| python-for-android | \`${P4A_COMMIT}\` (from p4a.commit) |"
+          echo "| buildozer | ${BUILD0ZER_VER:-unknown} |"
+          echo "| target API / min | 36 / 21 |"
+          echo "| arch | arm64-v8a |"
         } >> $GITHUB_STEP_SUMMARY
 
     - name: Cache Android NDK r28b
@@ -269,7 +284,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/.buildozer/android/platform/build-arm64-v8a
-        key: ${{ runner.os }}-${{ runner.arch }}-native-api36-min21-arm64-v8a-ndk${{ steps.toolchain.outputs.ndk_rev }}-p4a${{ steps.toolchain.outputs.p4a_version }}-spec${{ hashFiles('buildozer-sideload.spec') }}-req${{ hashFiles('requirements.txt') }}-recipes${{ hashFiles('p4a_recipes/**') }}
+        key: ${{ runner.os }}-${{ runner.arch }}-native-api36-min21-arm64-v8a-ndk${{ steps.toolchain.outputs.ndk_rev }}-p4a${{ steps.toolchain.outputs.p4a_commit }}-spec${{ hashFiles('buildozer-sideload.spec') }}-req${{ hashFiles('requirements.txt') }}-recipes${{ hashFiles('p4a_recipes/**') }}
 
     # Explicit, auditable clean-native switch. The hosted runner is already a
     # fresh VM, so this only removes anything the cache step above restored.
@@ -297,9 +312,9 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/.ccache
-        key: ${{ runner.os }}-ccache-ndk${{ steps.toolchain.outputs.ndk_rev }}-p4a${{ steps.toolchain.outputs.p4a_version }}-${{ hashFiles('buildozer-sideload.spec', 'requirements.txt', 'p4a_recipes/**') }}
+        key: ${{ runner.os }}-ccache-ndk${{ steps.toolchain.outputs.ndk_rev }}-p4a${{ steps.toolchain.outputs.p4a_commit }}-${{ hashFiles('buildozer-sideload.spec', 'requirements.txt', 'p4a_recipes/**') }}
         restore-keys: |
-          ${{ runner.os }}-ccache-ndk${{ steps.toolchain.outputs.ndk_rev }}-p4a${{ steps.toolchain.outputs.p4a_version }}-
+          ${{ runner.os }}-ccache-ndk${{ steps.toolchain.outputs.ndk_rev }}-p4a${{ steps.toolchain.outputs.p4a_commit }}-
 
     # ── Use the validated sideload spec (Track A) ──
     - name: Select Track A (sideload) build spec

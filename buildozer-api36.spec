@@ -54,6 +54,19 @@ android.allow_backup = False
 p4a.log_level = ERROR
 p4a.cython_directives = {"language_level": "3"}
 p4a.release_dir = .buildozer/android/platform/build-{arch}/dist
+
+# Pin python-for-android by commit. buildozer does NOT install p4a from PyPI:
+# it git-clones kivy/python-for-android -b master into the platform dir and
+# then runs `python -m pythonforandroid.toolchain` with that directory as cwd.
+# With p4a.commit left at its default of HEAD, every CI run silently uses
+# whatever master happens to be at that moment, so the native stack -- and
+# therefore the page alignment of the shipped libraries -- is not
+# reproducible from the repository.
+#
+# 58d21141f17c889bf8585f5665921d72028f8831 is tag v2026.05.09, the exact
+# revision the qualified APK was built from. Its pythonforandroid/archs.py is
+# pristine (no max-page-size edits) and it recommends NDK 28c.
+p4a.commit = 58d21141f17c889bf8585f5665921d72028f8831
 # Required: p4a_recipes/ carries the local overrides this build depends on --
 # above all the Kivy recipe, which must shadow upstream under NDK r28/Clang 19.
 # Without this line the r28 build fails to compile Kivy. See
