@@ -468,13 +468,21 @@ def audit_apk(apk: str, strict_relro: bool, allow_missing_zipalign: bool) -> boo
           and (not strict_relro or not relro_missing))
     if ok:
         print("RESULT: PASS - every packaged ARM64 native library is 16 KB aligned")
-        print("        and APK packaging alignment verified.")
+        if zip_ok:
+            print("        and APK packaging alignment verified (zipalign -P 16).")
+        else:
+            # Never claim the ZIP half was verified when it was opted out of.
+            print("        (APK packaging alignment NOT verified: zipalign unavailable")
+            print("         and --allow-missing-zipalign was given.)")
     else:
         print("RESULT: FAIL")
         if failures:
             print(f"        {len(failures)} library(ies) failed the ELF 16 KB test.")
         if not zip_ok:
-            print("        APK ZIP alignment verification failed.")
+            if zip_missing:
+                print("        APK ZIP alignment could not be verified: zipalign not found.")
+            else:
+                print("        APK ZIP alignment verification failed.")
         if not payload_ok:
             print(f"        {len(payload_problems)} forbidden payload categor(ies) present.")
         if strict_relro and relro_missing:
