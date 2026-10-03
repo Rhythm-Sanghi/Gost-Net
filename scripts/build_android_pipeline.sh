@@ -12,7 +12,14 @@
 # python-for-android is therefore used pristine; only in-repo local recipes
 # under p4a_recipes/ are applied. scripts/check_android_16kb.py then gates the
 # result and fails the build on any noncompliant library.
+
+# `set -e` alone does NOT protect this script: every buildozer invocation is piped
+# into `tee`, and a pipeline reports the status of its LAST command. A failed
+# native build would therefore sail past this line, and the gate below would
+# happily audit whatever APK happened to be left in bin/. pipefail makes the
+# buildozer status authoritative.
 set -e
+set -o pipefail
 
 # Rust toolchain — must be on PATH before buildozer spawns p4a subprocesses
 export CARGO_HOME="$HOME/.cargo"
@@ -68,8 +75,25 @@ cp buildozer-sideload.spec buildozer.spec
 echo "=== Starting Buildozer Debug Build for Modern Android ==="
 buildozer -v android debug 2>&1 | tee build_sideload.log
 
-echo "=== Ensuring _rust.abi3.so has libpython3.11.so in DT_NEEDED ==="
-find .buildozer/ -name "_rust.abi3.so" -exec patchelf --add-needed libpython3.11.so {} + || true
+# No post-build `patchelf` sweep here, deliberately.
+#
+# An earlier revision carried:
+#
+#     find .buildozer/ -name "_rust.abi3.so" -exec patchelf --add-needed \
+#         libpython3.11.so {} + || true
+#
+# It was ineffective and misleading at the same time. It runs after buildozer has
+# already written the APK, so it cannot change what ships; it rewrites ELF
+# structures for objects that never reach the package; and `|| true` discards any
+# error, so a failing patch still reported success. Because it did modify the
+# build tree, a later manual inspection of .buildozer/ would show a correct
+# DT_NEEDED while the packaged APK stayed broken -- precisely the failure this
+# gate exists to catch.
+#
+# The dependency is now produced by the linker instead. The cryptography recipe
+# passes `-L<link_root> -lpython<link_version>` through RUSTFLAGS and asserts the
+# resulting DT_NEEDED edge after install_wheel(), aborting the build if it is
+# absent. scripts/check_android_16kb.py then re-checks the packaged APK.
 
 echo "=== GATING: 16 KB Memory Page Size & ELF Alignment Audit ==="
 # Gated before the artifact leaves this machine: a noncompliant APK is never

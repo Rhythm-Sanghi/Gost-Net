@@ -60,6 +60,17 @@ def _setup_crash_logging():
 
 _setup_crash_logging()
 
+# Qualify the cryptography native extension before anything imports it. On
+# Android a Rust extension that fails to link against libpython is not caught by
+# the page-size gate or by the desktop test suite -- it only surfaces when the
+# device's dynamic loader opens it, which is why this runs first and why its
+# result is written to disk where it can be read back after a crash.
+try:
+    from crypto_selftest import run as _run_crypto_selftest
+    _CRYPTO_SELFTEST_OK, _CRYPTO_SELFTEST_DETAIL = _run_crypto_selftest()
+except Exception as _exc:  # pragma: no cover - diagnostics must never block boot
+    _CRYPTO_SELFTEST_OK, _CRYPTO_SELFTEST_DETAIL = False, repr(_exc)
+
 # UI Components, Screens, and Framework shims (re-exported for backwards compatibility)
 from ui import (
     apply_premium_background,

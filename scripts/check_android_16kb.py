@@ -38,6 +38,17 @@ F) APK payload hygiene. Every zip entry name is matched against a deny-list
    files, secret and signing keys, developer credentials, database files,
    developer machine paths, crash logs and VCS metadata.
 
+G) Python C-API runtime linkage.  Page alignment does not imply loadability:
+   on Android every dlopen() resolves against a linker namespace, so a Python
+   extension that leaves ``Py*`` symbols undefined must itself declare the
+   interpreter in ``DT_NEEDED``.  For every ELF object in the APK (packaged
+   directly or nested in ``libpybundle.so``) that references the Python C-API,
+   this group requires that a packaged interpreter is named in ``DT_NEEDED`` and
+   that it really exports every symbol the extension left undefined, with
+   default visibility.  A module missing that edge is reported by the device as
+   ``ImportError: dlopen failed: cannot locate symbol "PyExc_TypeError"`` and
+   is invisible to both a page-size audit and the desktop test suite.
+
 Nothing is special-cased by library name: any ELF under lib/<abi>/ is audited,
 and any non-ELF container is decompressed and audited internally.
 
@@ -161,8 +172,175 @@ def parse_elf(data: bytes) -> dict:
     }
 
 
+# --------------------------------------------------------------------------
+# ELF dynamic linking: DT_NEEDED and .dynsym
+# --------------------------------------------------------------------------
+# Both readers are pure standard library on purpose. The gate has to run on a
+# bare CI runner and inside a p4a build where no NDK toolchain is guaranteed, so
+# it must not shell out to llvm-readelf in order to reach a verdict.
+SHT_STRTAB = 3
+SHT_DYNSYM = 11
+STV_DEFAULT = 0
+
+_DT_NULL = 0
+_DT_NEEDED = 1
+_DT_STRTAB = 5
+_PT_DYNAMIC = 2
+
+
+def _elf64(data: bytes) -> bool:
+    return len(data) >= 64 and data[:4] == b"\x7fELF" and data[4] == 2 and data[5] == 1
+
+
+def _phdrs(data: bytes) -> list[tuple[int, int, int, int, int]]:
+    """Program headers as ``(p_type, p_offset, p_vaddr, p_filesz, p_align)``.
+
+    Every read is bounds-checked. A truncated or corrupt object yields fewer
+    headers instead of raising ``struct.error``: a gate that aborts on the
+    first malformed library would skip auditing all the others, which is the
+    one thing a gate must never do.
+    """
+    if not _elf64(data):
+        return []
+    e_phoff = struct.unpack_from("<Q", data, 32)[0]
+    e_phentsize = struct.unpack_from("<H", data, 54)[0]
+    e_phnum = struct.unpack_from("<H", data, 56)[0]
+    if e_phentsize < 56:
+        return []
+    out = []
+    for i in range(e_phnum):
+        off = e_phoff + i * e_phentsize
+        if off + 56 > len(data):
+            break
+        out.append((
+            struct.unpack_from("<I", data, off)[0],
+            struct.unpack_from("<Q", data, off + 8)[0],
+            struct.unpack_from("<Q", data, off + 16)[0],
+            struct.unpack_from("<Q", data, off + 32)[0],
+            struct.unpack_from("<Q", data, off + 48)[0],
+        ))
+    return out
+
+
+def _load_segments(data: bytes) -> list[tuple[int, int, int]]:
+    return [(vaddr, offset, filesz)
+            for p_type, offset, vaddr, filesz, _al in _phdrs(data)
+            if p_type == PT_LOAD]
+
+
+def _vaddr_to_offset(loads: list[tuple[int, int, int]], vaddr: int) -> int | None:
+    for lvaddr, loff, lsz in loads:
+        if lvaddr <= vaddr < lvaddr + lsz:
+            return loff + (vaddr - lvaddr)
+    return None
+
+
+def elf_dt_needed(data: bytes) -> list[str]:
+    """DT_NEEDED library names of an ELF64 LE object ([] when there are none).
+
+    Malformed input yields ``[]`` rather than an exception, so a single
+    corrupt library cannot abort the audit of every other library.
+    """
+    if not _elf64(data):
+        return []
+
+    loads: list[tuple[int, int, int]] = []
+    dynamic = None
+    for p_type, p_offset, p_vaddr, p_filesz, _al in _phdrs(data):
+        if p_type == PT_LOAD:
+            loads.append((p_vaddr, p_offset, p_filesz))
+        elif p_type == _PT_DYNAMIC:
+            dynamic = (p_offset, p_filesz)
+
+    if dynamic is None:
+        return []
+
+    entries: list[tuple[int, int]] = []
+    pos = dynamic[0]
+    while pos + 16 <= min(dynamic[0] + dynamic[1], len(data)):
+        tag, value = struct.unpack_from("<qQ", data, pos)
+        pos += 16
+        if tag == _DT_NULL:
+            break
+        entries.append((tag, value))
+
+    strtab = next((v for t, v in entries if t == _DT_STRTAB), None)
+    if strtab is None:
+        return []
+    strtab_off = _vaddr_to_offset(loads, strtab)
+    if strtab_off is None or strtab_off >= len(data):
+        return []
+
+    needed = []
+    for tag, value in entries:
+        if tag != _DT_NEEDED:
+            continue
+        start = strtab_off + value
+        if start >= len(data):
+            continue
+        end = data.find(b"\0", start)
+        if end < 0:
+            continue
+        needed.append(data[start:end].decode("utf-8", "replace"))
+    return needed
+
+
+def elf_dynsyms(data: bytes) -> dict[str, tuple[bool, int]]:
+    """Map every ``.dynsym`` name to ``(is_defined, st_other_visibility)``.
+
+    A name that appears both undefined and defined is recorded as defined,
+    which is what the dynamic linker itself does.
+    """
+    out: dict[str, tuple[bool, int]] = {}
+    if not _elf64(data):
+        return out
+
+    e_shoff = struct.unpack_from("<Q", data, 40)[0]
+    e_shentsize = struct.unpack_from("<H", data, 58)[0]
+    e_shnum = struct.unpack_from("<H", data, 60)[0]
+    if e_shoff == 0 or e_shnum == 0 or e_shentsize < 64:
+        return out
+    # Bounds-check the section header table up front. Without this a truncated
+    # object raises struct.error and the whole audit stops here.
+    if e_shoff + e_shnum * e_shentsize > len(data):
+        return out
+
+    sections = [struct.unpack_from("<IIQQQQIIQQ", data, e_shoff + i * e_shentsize)
+                for i in range(e_shnum)]
+
+    for sec in sections:
+        _nm, stype, _fl, _ad, soff, ssize, slink, _inf, _al, sentsize = sec
+        if stype != SHT_DYNSYM or sentsize == 0 or slink >= len(sections):
+            continue
+        strtab = sections[slink]
+        stroff, strsize = strtab[4], strtab[5]
+        if stroff + strsize > len(data):
+            continue
+        if soff + ssize > len(data):
+            continue
+        for k in range(ssize // sentsize):
+            so = soff + k * sentsize
+            if so + 24 > len(data):
+                break
+            st_name, _st_info, st_other, st_shndx = struct.unpack_from(
+                "<IBBH", data, so)
+            if st_name == 0 or stroff + st_name >= stroff + strsize:
+                continue
+            start = stroff + st_name
+            end = data.find(b"\0", start, stroff + strsize)
+            if end < 0:
+                continue
+            name = data[start:end].decode("utf-8", "replace")
+            defined = st_shndx != 0
+            prev = out.get(name)
+            if prev is None or (not prev[0] and defined):
+                out[name] = (defined, st_other & 0x3)
+    return out
+
+
 def _audit_blob(name: str, data: bytes, failures: list, relro_missing: list,
-                expected_machine: int, depth: int = 0) -> dict:
+                expected_machine: int, depth: int = 0,
+                samples: list | None = None, abi: str = "") -> dict:
     """Recursively audit one packaged blob.
 
     ``expected_machine`` is the e_machine the ABI directory requires; pass None
@@ -175,6 +353,10 @@ def _audit_blob(name: str, data: bytes, failures: list, relro_missing: list,
         arch_ok = expected_machine is None or machine == expected_machine
         if not info["has_relro"]:
             relro_missing.append(name)
+        if samples is not None:
+            # Retained for the Python C-API linkage audit: a dlopen()ed extension
+            # must be checked for loadability, not only for page alignment.
+            samples.append((name, data, abi))
         return {
             "name": name,
             "kind": "ELF",
@@ -204,6 +386,8 @@ def _audit_blob(name: str, data: bytes, failures: list, relro_missing: list,
                         blob = fh.read()
                         r = parse_elf(blob)
                         inner_total += 1
+                        if samples is not None and r.get("is_elf"):
+                            samples.append((member.name, blob, abi))
                         if not r.get("is_elf"):
                             inner_bad.append(f"{member.name} (not ELF)")
                             continue
@@ -402,6 +586,123 @@ def audit_payload(entries: list[str]) -> tuple[bool, list[tuple[str, list[str]]]
     return not problems, problems
 
 
+# --------------------------------------------------------------------------
+# Python C-API runtime linkage
+# --------------------------------------------------------------------------
+# Page alignment does not imply loadability. On Android every dlopen() resolves
+# against a linker namespace, so a Python extension that references Py* symbols
+# must itself declare the interpreter in DT_NEEDED: the fact that libpython is
+# already mapped by the process is not sufficient. An extension that omits the
+# edge aborts at import time with
+#
+#     ImportError: dlopen failed: cannot locate symbol "PyExc_TypeError"
+#
+# which is a *runtime* failure invisible to a page-size audit and to every
+# desktop test. This group therefore checks, for every ELF object in the APK
+# (packaged directly or nested inside libpybundle.so):
+#
+#   1. a libpython shared object is packaged under the same ABI directory;
+#   2. each object referencing Py* names a packaged libpython in DT_NEEDED;
+#   3. every undefined Py* symbol is exported by that provider, with default
+#      visibility.
+#
+# Nothing here is keyed on a library name: any extension that uses the Python
+# C-API is subject to the same three rules.
+
+PY_API_PREFIX = "Py"
+LIBPYTHON_NEEDED = re.compile(r"^libpython\d")
+
+
+def linkage_guard_problem(link_checked: int, interpreters: list[str],
+                          sample_count: int) -> str | None:
+    """Reason to fail when the linkage audit examined nothing.
+
+    An APK that ships an interpreter and Python extensions must produce at
+    least one consumer. Reaching zero means the symbol reader stopped
+    understanding the objects, which would otherwise downgrade this group to a
+    silent "N/A" pass -- exactly the failure mode a gate exists to prevent.
+
+    Returns the failure message, or ``None`` when no guard is warranted.
+    """
+    if link_checked != 0 or not interpreters:
+        return None
+    return (
+        f"no ELF in the APK reported any Python C-API reference, yet "
+        f"{', '.join(interpreters)} is packaged. The linkage audit found "
+        f"{sample_count} ELF object(s) but zero consumers, which means the "
+        f"dynamic symbol table could not be read -- refusing to pass."
+    )
+
+
+def audit_python_api_linkage(
+        samples: list[tuple[str, bytes, str]],
+        packaged: dict[str, dict[str, bytes]]
+) -> tuple[bool, int, list[str]]:
+    """Return ``(ok, consumers_checked, [failure descriptions])``.
+
+    ``samples`` is a list of ``(label, elf_bytes, abi_directory)`` for every
+    ELF object in the APK, packaged directly or nested in a container.
+    ``packaged`` maps an ABI directory to ``{basename: bytes}`` of the ELF
+    libraries shipped under it.
+
+    The provider is taken from the consumer's own DT_NEEDED rather than guessed,
+    so the check asks exactly the question that matters at dlopen() time: does the
+    interpreter this module names exist in the APK, and does it really export the
+    symbols the module left undefined?
+    """
+    if not samples:
+        return True, 0, []
+
+    problems: list[str] = []
+    checked = 0
+    for name, blob, abi in samples:
+        undef = sorted(sym for sym, (defined, _v) in elf_dynsyms(blob).items()
+                       if not defined and sym.startswith(PY_API_PREFIX))
+        if not undef:
+            continue
+        checked += 1
+
+        needed = elf_dt_needed(blob)
+        declared = [n for n in needed if LIBPYTHON_NEEDED.match(n)]
+        if not declared:
+            problems.append(
+                f"{name}: references {len(undef)} Python C-API symbols "
+                f"(e.g. {', '.join(undef[:3])}) but declares no Python "
+                f"interpreter in DT_NEEDED (found: {needed}). Android resolves "
+                f"dlopen()ed symbols per linker namespace, so the interpreter "
+                f"must be an explicit dependency or the import fails with "
+                f"'dlopen failed: cannot locate symbol'."
+            )
+            continue
+
+        libs = packaged.get(abi, {})
+        absent = [p for p in declared if p not in libs]
+        resolved: set[str] = set()
+        for provider in declared:
+            if provider not in libs:
+                continue
+            table = elf_dynsyms(libs[provider])
+            for sym in undef:
+                defined, vis = table.get(sym, (False, STV_DEFAULT))
+                if defined and vis == STV_DEFAULT:
+                    resolved.add(sym)
+
+        if absent:
+            problems.append(
+                f"{name}: DT_NEEDED names interpreter(s) that are not packaged "
+                f"under lib/{abi}/: {', '.join(absent)}"
+            )
+        missing = [s for s in undef if s not in resolved]
+        if missing:
+            problems.append(
+                f"{name}: {len(missing)} of {len(undef)} Python C-API symbols are "
+                f"not exported with default visibility by "
+                f"{', '.join(declared)} (e.g. {', '.join(missing[:3])})"
+            )
+
+    return not problems, checked, problems
+
+
 def audit_apk(apk: str, strict_relro: bool, allow_missing_zipalign: bool) -> bool:
     print("=" * 78)
     print(f"APK : {apk}")
@@ -411,6 +712,7 @@ def audit_apk(apk: str, strict_relro: bool, allow_missing_zipalign: bool) -> boo
     failures: list[tuple[str, str]] = []
     relro_missing: list[str] = []
     rows: list[dict] = []
+    samples: list[tuple[str, bytes, str]] = []
 
     with zipfile.ZipFile(apk) as zf:
         entries = zf.namelist()
@@ -439,7 +741,8 @@ def audit_apk(apk: str, strict_relro: bool, allow_missing_zipalign: bool) -> boo
             abi = path.split("/")[1]
             expected = ABI_MACHINE.get(abi)
             res = _audit_blob(os.path.basename(path), zf.read(path),
-                              failures, relro_missing, expected)
+                              failures, relro_missing, expected,
+                              samples=samples, abi=abi)
             rows.append(res)
 
             # Record every failing ELF by name so the failure report is exact.
@@ -534,6 +837,38 @@ def audit_apk(apk: str, strict_relro: bool, allow_missing_zipalign: bool) -> boo
             if len(hits) > 8:
                 print(f"            ... and {len(hits) - 8} more")
 
+    # --- Python C-API linkage gate -------------------------------------------
+    print()
+    print("Python C-API runtime linkage (dlopen loadability):")
+    packaged: dict[str, dict[str, bytes]] = {}
+    for name, blob, abi in samples:
+        packaged.setdefault(abi, {})[name.rsplit("/", 1)[-1]] = blob
+    link_ok, link_checked, link_problems = audit_python_api_linkage(samples, packaged)
+
+    # An APK that ships an interpreter and Python extensions must produce at
+    # least one consumer; zero means the reader stopped understanding the
+    # objects and this group would silently degrade to "N/A".
+    interpreters = sorted({
+        base for libs in packaged.values() for base in libs
+        if LIBPYTHON_NEEDED.match(base)
+    })
+    guard = linkage_guard_problem(link_checked, interpreters, len(samples))
+    if guard is not None:
+        link_ok = False
+        link_problems = [guard]
+
+    if link_ok:
+        if link_checked == 0:
+            print("    N/A - no packaged ELF references the Python C-API")
+        else:
+            print(f"    PASS - {link_checked} ELF object(s) reference the Python C-API;")
+            print("           each declares a packaged interpreter in DT_NEEDED and")
+            print("           every undefined Py* symbol is exported with default")
+            print("           visibility")
+    else:
+        for problem in link_problems:
+            print(f"    FAIL  {problem}")
+
     # --- Verdict ------------------------------------------------------------
     print()
     # A packaging check only counts as satisfied if a capable zipalign
@@ -541,7 +876,7 @@ def audit_apk(apk: str, strict_relro: bool, allow_missing_zipalign: bool) -> boo
     packaging_ok = zip_ok or (zip_status in ("missing", "incompatible")
                               and allow_missing_zipalign)
     print("=" * 78)
-    ok = (not failures and packaging_ok and payload_ok
+    ok = (not failures and packaging_ok and payload_ok and link_ok
           and (not strict_relro or not relro_missing))
     if ok:
         print("RESULT: PASS - every packaged ARM64 native library is 16 KB aligned")
@@ -567,6 +902,9 @@ def audit_apk(apk: str, strict_relro: bool, allow_missing_zipalign: bool) -> boo
                 print("        APK ZIP alignment verification failed.")
         if not payload_ok:
             print(f"        {len(payload_problems)} forbidden payload categor(ies) present.")
+        if not link_ok:
+            print(f"        {len(link_problems)} Python C-API linkage failure(s): "
+                  "an extension the app imports at startup cannot be dlopen()ed.")
         if strict_relro and relro_missing:
             print(f"        {len(relro_missing)} library(ies) lack GNU_RELRO.")
     print("=" * 78)
