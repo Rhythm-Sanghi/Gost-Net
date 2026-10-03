@@ -11,6 +11,7 @@ from datetime import datetime
 from kivy.metrics import dp
 from kivy.uix.widget import Widget
 from kivy.graphics import Color, Line
+from kivy.clock import Clock
 from kivymd.app import MDApp
 from kivymd.uix.screen import MDScreen
 from kivymd.uix.boxlayout import MDBoxLayout

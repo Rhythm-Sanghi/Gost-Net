@@ -15,6 +15,7 @@ from kivy.uix.widget import Widget
 from kivymd.app import MDApp
 from kivymd.uix.screen import MDScreen
 from kivymd.uix.boxlayout import MDBoxLayout
+from kivymd.uix.card import MDCard
 from kivymd.uix.button import MDButton, MDIconButton
 from kivymd.uix.label import MDLabel
 
