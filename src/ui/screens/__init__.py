@@ -10,6 +10,7 @@ from ui.screens.map_screen import MapScreen, GhostMapMarker, OfflineMBTilesMapSo
 from ui.screens.diagnostics_screen import DiagnosticsScreen
 from ui.screens.settings_screen import SettingsScreen
 from ui.screens.notes_screen import NotesScreen
+from ui.screens.feed_screen import FeedScreen
 
 __all__ = [
     'LockScreen',
@@ -23,4 +24,5 @@ __all__ = [
     'DiagnosticsScreen',
     'SettingsScreen',
     'NotesScreen',
+    'FeedScreen',
 ]

@@ -45,7 +45,7 @@ class MockScreenManager:
         return self.screens.get(name)
 
     def has_screen(self, name):
-        return name in self.screens or name in ('radar', 'settings', 'diagnostics', 'map', 'notes', 'chat', 'lock', 'boot')
+        return name in self.screens or name in ('radar', 'settings', 'diagnostics', 'map', 'notes', 'chat', 'lock', 'boot', 'feed')
 
 
 class MockDialog:

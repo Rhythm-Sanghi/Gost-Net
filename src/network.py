@@ -523,24 +523,135 @@ class GhostEngine:
 
     def _persist_message(self, peer_id: str, sender_type: str, content_type: str, content: str,
                          timestamp: Optional[float] = None, ttl: Optional[int] = None, file_path: Optional[str] = None):
-        """Enqueues message persistence asynchronously."""
+        """Enqueues message persistence asynchronously (or synchronously if worker inactive) and records journal event."""
         if not self.persistence_db and not self.db_manager:
             return
         try:
-            self.persist_queue.put(('message', (peer_id, sender_type, content_type, content, timestamp, ttl, file_path)), timeout=0.5)
+            if hasattr(self, 'persist_thread') and self.persist_thread and self.persist_thread.is_alive():
+                self.persist_queue.put(('message', (peer_id, sender_type, content_type, content, timestamp, ttl, file_path)), timeout=0.5)
+            elif self.persistence_db:
+                self.persistence_db.save_message(peer_id, sender_type, content_type, content, timestamp, ttl)
         except Exception:
             if self.persistence_db:
                 self.persistence_db.save_message(peer_id, sender_type, content_type, content, timestamp, ttl)
 
+        try:
+            from spaces.models import EventType
+            content_bytes_len = len(str(content).encode('utf-8')) if content is not None else 0
+            ts = timestamp or time.time()
+            if sender_type in ("sent", "me"):
+                # Outgoing message created locally
+                self.emit_mesh_event(
+                    EventType.MESSAGE_CREATED,
+                    {
+                        "recipient_id": peer_id,
+                        "content_type": content_type,
+                        "size_bytes": content_bytes_len,
+                        "created_at": ts,
+                    },
+                    object_id=peer_id
+                )
+            else:
+                # Incoming message received from peer (not delivered-to-recipient ACK)
+                self.emit_mesh_event(
+                    EventType.MESSAGE_RECEIVED,
+                    {
+                        "sender_id": peer_id,
+                        "content_type": content_type,
+                        "size_bytes": content_bytes_len,
+                        "received_at": ts,
+                    },
+                    object_id=peer_id,
+                    author_id=peer_id
+                )
+        except Exception:
+            pass
+
     def _persist_peer(self, peer_id: str, username: str, discovery_type: Optional[str] = None):
-        """Enqueues peer persistence asynchronously."""
+        """Enqueues peer persistence asynchronously (or synchronously if worker inactive) and records journal event."""
         if not self.persistence_db and not self.db_manager:
             return
         try:
-            self.persist_queue.put(('peer', (peer_id, username, discovery_type)), timeout=0.5)
+            if hasattr(self, 'persist_thread') and self.persist_thread and self.persist_thread.is_alive():
+                self.persist_queue.put(('peer', (peer_id, username, discovery_type)), timeout=0.5)
+            elif self.persistence_db:
+                self.persistence_db.save_peer(peer_id, username, discovery_type=discovery_type)
         except Exception:
             if self.persistence_db:
                 self.persistence_db.save_peer(peer_id, username, discovery_type=discovery_type)
+
+        try:
+            from spaces.models import EventType
+            self.emit_mesh_event(
+                EventType.PEER_SEEN,
+                {
+                    "peer_id": peer_id,
+                    "observed_transport": discovery_type or "Direct",
+                    "observed_at": time.time()
+                },
+                object_id=peer_id,
+                author_id=self.peer_id
+            )
+        except Exception:
+            pass
+
+    def emit_mesh_event(self, event_type: str, payload: dict, object_id: Optional[str] = None,
+                        space_id: str = "spc_local_mesh", author_id: Optional[str] = None) -> Optional[Any]:
+        """
+        Emits a digitally signed event into the local event journal for the local coordination mesh.
+        """
+        if not self.persistence_db:
+            return None
+        try:
+            event_store = self.persistence_db.get_event_store()
+            if not event_store:
+                return None
+
+            # Ensure default Space exists
+            if not event_store.get_space(space_id):
+                from spaces.models import Space, ExpiryPolicy, JoinPolicy
+                event_store.create_space(Space(
+                    space_id=space_id,
+                    name="Local Coordination Mesh",
+                    description="Default local mesh coordination context",
+                    created_by=self.peer_id,
+                    expiry_policy=ExpiryPolicy.NEVER,
+                    join_policy=JoinPolicy.OPEN_NEARBY,
+                ))
+
+            from spaces.models import SpaceEvent
+            from spaces.envelope import generate_uuidv7, sign_event
+
+            sp = event_store.get_space(space_id)
+            clock = (sp.local_clock if sp else 0) + 1
+            author = author_id or self.peer_id
+
+            ev = SpaceEvent(
+                event_id=generate_uuidv7(),
+                space_id=space_id,
+                author_id=author,
+                device_id=self.peer_id,
+                timestamp=time.time(),
+                logical_clock=clock,
+                event_type=event_type,
+                object_id=object_id,
+                payload=payload,
+            )
+
+            if self.crypto_manager and getattr(self.crypto_manager, 'signing_private_key', None):
+                sign_event(ev, self.crypto_manager)
+
+            ok, res = event_store.store_event(ev, verify_sig=False if ev.author_id == self.peer_id else True)
+            if ok:
+                if hasattr(self, 'on_mesh_event') and callable(self.on_mesh_event):
+                    try:
+                        self.on_mesh_event(ev)
+                    except Exception as cb_err:
+                        print(f"[GhostEngine] on_mesh_event callback error: {cb_err}")
+                return ev
+        except Exception as e:
+            print(f"[GhostEngine] emit_mesh_event error: {e}")
+        return None
 
     
     def _get_local_ip(self) -> str:
@@ -2034,6 +2145,17 @@ class GhostEngine:
                     created_at=created_at,
                     expires_at=expires_at
                 )
+
+            try:
+                from spaces.models import EventType
+                self.emit_mesh_event(
+                    EventType.WAYPOINT_ADDED,
+                    {"title": title, "type": wp_type, "latitude": lat, "longitude": lon, "created_by": created_by},
+                    object_id=waypoint_id,
+                    author_id=created_by
+                )
+            except Exception:
+                pass
 
             if self.on_waypoint_received:
                 self.on_waypoint_received({
@@ -4780,6 +4902,21 @@ class GhostEngine:
             if self.on_delivery_status:
                 self.on_delivery_status(msg_id, target_ip, delivery_state)
 
+            if delivery_state == "DELIVERED":
+                try:
+                    from spaces.models import EventType
+                    self.emit_mesh_event(
+                        EventType.MESSAGE_DELIVERED,
+                        {
+                            "message_id": msg_id,
+                            "recipient_id": peer_id or target_ip,
+                            "delivered_at": time.time(),
+                        },
+                        object_id=msg_id
+                    )
+                except Exception:
+                    pass
+
             return SendResult(True, msg_id, delivery_state) if return_result else True
             
         except Exception as e:
@@ -4801,6 +4938,19 @@ class GhostEngine:
             if spooled:
                 timestamp_unix = time.time()
                 self._persist_message(target_ip, "me", "text", message_text, timestamp_unix, ttl)
+                try:
+                    from spaces.models import EventType
+                    self.emit_mesh_event(
+                        EventType.MESSAGE_QUEUED,
+                        {
+                            "message_id": msg_id,
+                            "recipient_id": peer_id or target_ip,
+                            "queued_at": time.time(),
+                        },
+                        object_id=msg_id
+                    )
+                except Exception:
+                    pass
                 return SendResult(True, msg_id, delivery_state) if return_result else True
                 
             return SendResult(False, msg_id, "FAILED", error=str(e)) if return_result else False
@@ -5544,6 +5694,19 @@ class GhostEngine:
                             client_socket.close()
                             
                             print(f"[Relay] Custody transferred: Forwarded packet for {target_peer_id} via {next_hop_id} (TTL: {ttl-1})")
+                            try:
+                                from spaces.models import EventType
+                                self.emit_mesh_event(
+                                    EventType.MESSAGE_RELAYED,
+                                    {
+                                        "target_peer_id": target_peer_id,
+                                        "next_hop_id": next_hop_id,
+                                        "relayed_at": time.time(),
+                                    },
+                                    object_id=target_peer_id
+                                )
+                            except Exception:
+                                pass
                             return
                         except Exception as e:
                             print(f"[Relay] Forward to {ip} failed: {e}. Trying multipath fallback...")
@@ -5581,6 +5744,19 @@ class GhostEngine:
                                                     fallback_socket.sendall(fallback_encrypted_header + self.HEADER_DELIMITER + payload)
                                                     fallback_socket.close()
                                                     print(f"[Relay] Custody transferred: Fallback forwarding successful via {fallback_peer_id}!")
+                                                    try:
+                                                        from spaces.models import EventType
+                                                        self.emit_mesh_event(
+                                                            EventType.MESSAGE_RELAYED,
+                                                            {
+                                                                "target_peer_id": target_peer_id,
+                                                                "next_hop_id": fallback_peer_id,
+                                                                "relayed_at": time.time(),
+                                                            },
+                                                            object_id=target_peer_id
+                                                        )
+                                                    except Exception:
+                                                        pass
                                                     return
                                                 except Exception as ex:
                                                     print(f"[Relay] Fallback via {fallback_peer_id} failed: {ex}")
@@ -5941,6 +6117,22 @@ class GhostEngine:
                 created_at=wp_data["created_at"],
                 expires_at=expires_at
             )
+            try:
+                from spaces.models import EventType
+                self.emit_mesh_event(
+                    EventType.WAYPOINT_ADDED,
+                    {
+                        "title": wp_data["title"],
+                        "type": wp_data["waypoint_type"],
+                        "latitude": wp_data["latitude"],
+                        "longitude": wp_data["longitude"],
+                        "created_by": wp_data["created_by"],
+                    },
+                    object_id=wp_data["waypoint_id"],
+                    author_id=wp_data["created_by"]
+                )
+            except Exception:
+                pass
 
         payload_json = json.dumps(wp_data)
         encrypted_payload = self._encrypt_message(payload_json)

@@ -107,11 +107,20 @@ class RadarScreen(MDScreen):
             spacing=dp(4)
         )
         
+        feed_btn = MDIconButton(
+            icon='format-list-bulleted',
+            theme_icon_color='Custom',
+            icon_color=(0.627, 0.631, 0.604, 1),
+            size_hint_x=0.2,
+            pos_hint={'center_y': 0.5}
+        )
+        feed_btn.bind(on_release=self.open_feed)
+
         map_btn = MDIconButton(
             icon='map',
             theme_icon_color='Custom',
             icon_color=(0.627, 0.631, 0.604, 1),
-            size_hint_x=0.25,
+            size_hint_x=0.2,
             pos_hint={'center_y': 0.5}
         )
         map_btn.bind(on_release=self.open_map)
@@ -120,7 +129,7 @@ class RadarScreen(MDScreen):
             icon='note-text',
             theme_icon_color='Custom',
             icon_color=(0.627, 0.631, 0.604, 1),
-            size_hint_x=0.25,
+            size_hint_x=0.2,
             pos_hint={'center_y': 0.5}
         )
         notes_btn.bind(on_release=self.open_notes)
@@ -129,7 +138,7 @@ class RadarScreen(MDScreen):
             icon='chart-timeline-variant',
             theme_icon_color='Custom',
             icon_color=(0.627, 0.631, 0.604, 1),
-            size_hint_x=0.25,
+            size_hint_x=0.2,
             pos_hint={'center_y': 0.5}
         )
         diag_btn.bind(on_release=self.open_diagnostics)
@@ -138,11 +147,12 @@ class RadarScreen(MDScreen):
             icon='cog',
             theme_icon_color='Custom',
             icon_color=(0.627, 0.631, 0.604, 1),
-            size_hint_x=0.25,
+            size_hint_x=0.2,
             pos_hint={'center_y': 0.5}
         )
         settings_btn.bind(on_release=self.open_settings)
         
+        action_row.add_widget(feed_btn)
         action_row.add_widget(map_btn)
         action_row.add_widget(notes_btn)
         action_row.add_widget(diag_btn)
@@ -488,6 +498,10 @@ class RadarScreen(MDScreen):
         from ui.navigation import get_navigation_controller
         get_navigation_controller().navigate_to('settings')
     
+    def open_feed(self, *args):
+        from ui.navigation import get_navigation_controller
+        get_navigation_controller().navigate_to('feed')
+
     def open_map(self, *args):
         from ui.navigation import get_navigation_controller
         get_navigation_controller().navigate_to('map')

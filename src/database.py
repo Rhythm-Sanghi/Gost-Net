@@ -31,6 +31,13 @@ class PersistenceDatabase:
         except Exception as e:
             self.initialization_error = f"Database initialization failed: {e}"
             print(f"[PersistenceDatabase] ERROR: {self.initialization_error}")
+
+        self.event_store = None
+        try:
+            from spaces.event_store import EventStore
+            self.event_store = EventStore(self)
+        except Exception as e:
+            print(f"[PersistenceDatabase] EventStore init deferred: {e}")
             
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=10.0)
@@ -45,6 +52,13 @@ class PersistenceDatabase:
     def close(self):
         """Cleanly releases any cached handles or connections."""
         pass
+
+    def get_event_store(self):
+        """Returns the local EventStore instance."""
+        if not self.event_store:
+            from spaces.event_store import EventStore
+            self.event_store = EventStore(self)
+        return self.event_store
     
     def _initialize_database(self):
         with self.db_lock:

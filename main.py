@@ -102,6 +102,7 @@ from ui import (
     DiagnosticsScreen,
     SettingsScreen,
     NotesScreen,
+    FeedScreen,
 )
 from ui.theme import _safe_import
 
@@ -198,6 +199,7 @@ class GhostNetApp(MDApp):
         sm.add_widget(SettingsScreen())
         sm.add_widget(NotesScreen())
         sm.add_widget(MapScreen())
+        sm.add_widget(FeedScreen())
         
         sm.current = 'lock'
         
