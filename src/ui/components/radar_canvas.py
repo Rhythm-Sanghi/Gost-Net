@@ -55,23 +55,23 @@ class RadarWidget(Widget):
             # Draw concentric background grid rings
             for i in range(1, 4):
                 r = radius * (i / 3)
-                Color(0.65, 0.79, 0.92, 0.06 * i)
+                Color(0.24, 0.44, 0.64, 0.12 * i)
                 Line(circle=(cx, cy, r), width=1, dash_length=4, dash_offset=2)
                 
             # Draw crosshairs (subtle grid axes)
-            Color(0.65, 0.79, 0.92, 0.08)
+            Color(0.24, 0.44, 0.64, 0.18)
             Line(points=[cx - radius, cy, cx + radius, cy], width=1)
             Line(points=[cx, cy - radius, cx, cy + radius], width=1)
             
             # Draw the rotating sweep trail (multiple lines with decaying alpha)
             for i in range(12):
-                alpha = 0.8 * (1 - i / 12)
+                alpha = 0.65 * (1 - i / 12)
                 trail_angle = (self.angle - i * 2.2) % 360
                 rad = math.radians(trail_angle)
                 tx = cx + radius * math.cos(rad)
                 ty = cy + radius * math.sin(rad)
                 
-                Color(0.65, 0.79, 0.92, alpha)
+                Color(0.24, 0.44, 0.64, alpha)
                 Line(points=[cx, cy, tx, ty], width=1.5 if i == 0 else 0.8)
             
             # Draw remote peer blips deterministically plotted on radar
@@ -87,25 +87,25 @@ class RadarWidget(Widget):
                 # Draw pulsing blip halo
                 pulse_r = 6 + self.pulse_val * 10
                 pulse_alpha = 0.45 * (1.0 - self.pulse_val)
-                Color(0.65, 0.79, 0.92, pulse_alpha)
+                Color(0.35, 0.62, 0.42, pulse_alpha)
                 Line(circle=(px, py, pulse_r), width=1)
                 
                 # Outer circle
-                Color(0.65, 0.79, 0.92, 0.35)
+                Color(0.35, 0.62, 0.42, 0.5)
                 Line(circle=(px, py, 6), width=1)
                 
                 # Solid inner node
-                Color(0.65, 0.79, 0.92, 1.0)
+                Color(0.35, 0.62, 0.42, 1.0)
                 Ellipse(pos=(px - 3, py - 3), size=(6, 6))
             
             # Central local node with pulsing ring
             pulse_r = 10 + self.pulse_val * 25
-            pulse_alpha = 0.5 * (1.0 - self.pulse_val)
-            Color(0.65, 0.79, 0.92, pulse_alpha)
+            pulse_alpha = 0.4 * (1.0 - self.pulse_val)
+            Color(0.24, 0.44, 0.64, pulse_alpha)
             Line(circle=(cx, cy, pulse_r), width=1)
             
-            # Central ice-blue solid node
-            Color(0.65, 0.79, 0.92, 1.0)
+            # Central local node (steel blue)
+            Color(0.24, 0.44, 0.64, 1.0)
             Ellipse(pos=(cx - 5, cy - 5), size=(10, 10))
             
     def animate_sweep(self, dt):
@@ -193,11 +193,11 @@ class MeshTopologyWidget(Widget):
                 Color(0.65, 0.79, 0.92, pulse_alpha)
                 Line(circle=(center_x, center_y, pulse_r), width=1)
                 
-                Color(0.65, 0.79, 0.92, 0.3)
+                Color(0.24, 0.44, 0.64, 0.3)
                 Line(circle=(center_x, center_y, 18), width=1.5)
-                Color(0.65, 0.79, 0.92, 1)
+                Color(0.24, 0.44, 0.64, 1)
                 Ellipse(pos=(center_x - 10, center_y - 10), size=(20, 20))
-            lbl = Label(text="ME (Local)", font_size='12sp', color=(0.65, 0.79, 0.92, 1))
+            lbl = Label(text="ME (Local)", font_size='12sp', color=(0.91, 0.91, 0.89, 1))
             lbl.pos = (center_x - 50, center_y - 35)
             lbl.size = (100, 20)
             self.add_widget(lbl)
@@ -225,41 +225,41 @@ class MeshTopologyWidget(Widget):
                     next_hop = route.get('next_hop')
                     
                 if not next_hop or next_hop == dest or next_hop == 'N/A':
-                    # Direct route (ice-blue)
-                    Color(0.65, 0.79, 0.92, 0.8)
+                    # Direct route (industrial blue)
+                    Color(0.24, 0.44, 0.64, 0.8)
                     Line(points=[center_x, center_y, dest_coords[0], dest_coords[1]], width=1.5)
                 else:
-                    # Indirect route via next_hop (dashed grey-indigo)
+                    # Indirect route via next_hop (dashed dark border)
                     if next_hop in node_coords:
                         hop_coords = node_coords[next_hop]
-                        # Draw local to next hop (ice-blue translucent)
-                        Color(0.65, 0.79, 0.92, 0.4)
+                        # Draw local to next hop (steel-blue translucent)
+                        Color(0.24, 0.44, 0.64, 0.4)
                         Line(points=[center_x, center_y, hop_coords[0], hop_coords[1]], width=1.5)
-                        # Draw next hop to destination (dashed grey-indigo)
-                        Color(0.25, 0.32, 0.45, 0.6)
+                        # Draw next hop to destination (dashed rule)
+                        Color(0.28, 0.28, 0.27, 0.6)
                         Line(points=[hop_coords[0], hop_coords[1], dest_coords[0], dest_coords[1]], width=1.5, dash_length=4, dash_offset=2)
                         
             # Draw local node with pulsing outer glow ring
             pulse_r = 14 + self.pulse_val * 12
             pulse_alpha = 0.4 * (1.0 - self.pulse_val)
-            Color(0.65, 0.79, 0.92, pulse_alpha)
+            Color(0.24, 0.44, 0.64, pulse_alpha)
             Line(circle=(center_x, center_y, pulse_r), width=1)
             
-            Color(0.65, 0.79, 0.92, 0.3)
+            Color(0.24, 0.44, 0.64, 0.3)
             Line(circle=(center_x, center_y, 18), width=1.5)
-            Color(0.65, 0.79, 0.92, 1) # Ice-Blue
+            Color(0.24, 0.44, 0.64, 1) # Steel-Blue
             Ellipse(pos=(center_x - 10, center_y - 10), size=(20, 20))
             
             # Draw remote nodes with pulsing outer glow ring
             for node_id, coords in node_coords.items():
                 pulse_rem_r = 10 + self.pulse_val * 10
                 pulse_rem_alpha = 0.4 * (1.0 - self.pulse_val)
-                Color(0.18, 0.36, 0.68, pulse_rem_alpha)
+                Color(0.35, 0.62, 0.42, pulse_rem_alpha)
                 Line(circle=(coords[0], coords[1], pulse_rem_r), width=1)
                 
-                Color(0.18, 0.36, 0.68, 0.3)
+                Color(0.35, 0.62, 0.42, 0.3)
                 Line(circle=(coords[0], coords[1], 14), width=1.5)
-                Color(0.18, 0.36, 0.68, 0.85) # Indigo
+                Color(0.35, 0.62, 0.42, 0.85) # Muted Green
                 Ellipse(pos=(coords[0] - 8, coords[1] - 8), size=(16, 16))
                 
         # Draw labels

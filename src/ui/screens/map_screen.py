@@ -165,12 +165,12 @@ class MapScreen(MDScreen):
         back_btn = MDIconButton(
             icon='arrow-left',
             theme_icon_color='Custom',
-            icon_color=(0.65, 0.79, 0.92, 1)
+            icon_color=(0.627, 0.631, 0.604, 1)
         )
         back_btn.bind(on_release=self.go_back)
         
         title = MDLabel(
-            text='Field Map',
+            text='02 / FIELD MAP & GIS',
             font_style='Title',
             role='large',
             theme_text_color='Primary',
@@ -180,7 +180,7 @@ class MapScreen(MDScreen):
         share_btn = MDIconButton(
             icon='broadcast',
             theme_icon_color='Custom',
-            icon_color=(0.3, 0.8, 0.9, 1),
+            icon_color=(0.24, 0.44, 0.64, 1.0),
             size_hint_x=None,
             width=dp(44),
             pos_hint={'center_y': 0.5}
@@ -190,7 +190,7 @@ class MapScreen(MDScreen):
         waypoint_btn = MDIconButton(
             icon='map-marker-plus',
             theme_icon_color='Custom',
-            icon_color=(0.9, 0.75, 0.3, 1),
+            icon_color=(0.78, 0.58, 0.28, 1.0),
             size_hint_x=None,
             width=dp(44),
             pos_hint={'center_y': 0.5}
@@ -200,7 +200,7 @@ class MapScreen(MDScreen):
         locate_btn = MDIconButton(
             icon='crosshairs-gps',
             theme_icon_color='Custom',
-            icon_color=(0.65, 0.79, 0.92, 1),
+            icon_color=(0.35, 0.62, 0.42, 1.0),
             size_hint_x=None,
             width=dp(44),
             pos_hint={'center_y': 0.5}
@@ -237,11 +237,12 @@ class MapScreen(MDScreen):
                 spacing=dp(12),
                 size_hint=(1, 0.85),
                 pos_hint={'center_x': 0.5},
-                md_bg_color=(0.10, 0.12, 0.18, 0.85),
-                line_color=(0.25, 0.35, 0.50, 0.6)
+                md_bg_color=(0.090, 0.094, 0.086, 0.98),
+                line_color=(0.188, 0.192, 0.176, 1.0),
+                radius=[dp(4), dp(4), dp(4), dp(4)]
             )
             fallback_title = MDLabel(
-                text="Field Coordinates (Offline Sensor Mode)",
+                text="Sensor Coordinates (Offline Sensor Mode)",
                 font_style="Title",
                 role="medium",
                 theme_text_color="Primary",

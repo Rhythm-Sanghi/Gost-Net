@@ -77,9 +77,9 @@ class LockScreen(MDScreen):
             pos_hint={'center_x': 0.5},
             padding=dp(20),
             spacing=dp(14),
-            md_bg_color=(0.08, 0.10, 0.14, 0.95),
-            line_color=(0.22, 0.28, 0.38, 0.6),
-            radius=[dp(6), dp(6), dp(6), dp(6)]
+            md_bg_color=(0.090, 0.094, 0.086, 0.98),
+            line_color=(0.188, 0.192, 0.176, 1.0),
+            radius=[dp(4), dp(4), dp(4), dp(4)]
         )
         
         brand_layout = MDBoxLayout(
@@ -89,14 +89,14 @@ class LockScreen(MDScreen):
             height=dp(50)
         )
         title = MDLabel(
-            text='Ghost Net Setup',
-            font_style='Headline',
-            role='small',
+            text='01 / DEVICE INITIALIZATION',
+            font_style='Title',
+            role='medium',
             theme_text_color='Primary',
             halign='center'
         )
         subtitle = MDLabel(
-            text='Set up this device',
+            text='Configure local cryptographic identity',
             font_style='Body',
             role='small',
             theme_text_color='Secondary',
@@ -158,12 +158,13 @@ class LockScreen(MDScreen):
             style='filled',
             theme_width='Custom',
             size_hint_x=1,
+            radius=[dp(4), dp(4), dp(4), dp(4)],
             theme_bg_color='Custom',
-            md_bg_color=(0.65, 0.79, 0.92, 1)
+            md_bg_color=(0.24, 0.44, 0.64, 1.0)
         )
-        btn_text = MDButtonText(text='Create Account')
+        btn_text = MDButtonText(text='Initialize Device')
         btn_text.theme_text_color = 'Custom'
-        btn_text.text_color = (0.05, 0.06, 0.1, 1)
+        btn_text.text_color = (0.91, 0.91, 0.89, 1)
         self.submit_setup_btn.add_widget(btn_text)
         self.submit_setup_btn.bind(on_release=self.on_setup_submit)
         card.add_widget(self.submit_setup_btn)
@@ -220,9 +221,9 @@ class LockScreen(MDScreen):
             pos_hint={'center_x': 0.5, 'center_y': 0.5},
             padding=dp(24),
             spacing=dp(20),
-            md_bg_color=(0.08, 0.10, 0.14, 0.95),
-            line_color=(0.22, 0.28, 0.38, 0.6),
-            radius=[dp(6), dp(6), dp(6), dp(6)]
+            md_bg_color=(0.090, 0.094, 0.086, 0.98),
+            line_color=(0.188, 0.192, 0.176, 1.0),
+            radius=[dp(4), dp(4), dp(4), dp(4)]
         )
         
         brand_layout = MDBoxLayout(
@@ -232,14 +233,14 @@ class LockScreen(MDScreen):
             height=dp(60)
         )
         title = MDLabel(
-            text='Ghost Net',
-            font_style='Headline',
-            role='medium',
+            text='GOST-NET',
+            font_style='Title',
+            role='large',
             theme_text_color='Primary',
             halign='center'
         )
         subtitle = MDLabel(
-            text='Offline Mesh Communicator',
+            text='Offline Tactical Mesh Terminal',
             font_style='Body',
             role='small',
             theme_text_color='Secondary',
@@ -258,7 +259,7 @@ class LockScreen(MDScreen):
             multiline=False
         )
         self.pin_field.add_widget(MDTextFieldHintText(text="Enter PIN"))
-        self.pin_field.add_widget(MDTextFieldHelperText(text="Enter Master or Duress PIN", mode="persistent"))
+        self.pin_field.add_widget(MDTextFieldHelperText(text="Master PIN or Duress Trigger", mode="persistent"))
         self.pin_field.bind(text=self._on_pin_text_changed)
         self.pin_field.bind(on_text_validate=self.on_pin_submit)
         card.add_widget(self.pin_field)
@@ -267,12 +268,13 @@ class LockScreen(MDScreen):
             style='filled',
             theme_width='Custom',
             size_hint_x=1,
+            radius=[dp(4), dp(4), dp(4), dp(4)],
             theme_bg_color='Custom',
-            md_bg_color=(0.65, 0.79, 0.92, 1)
+            md_bg_color=(0.24, 0.44, 0.64, 1.0)
         )
-        btn_text = MDButtonText(text='Unlock')
+        btn_text = MDButtonText(text='Authenticate')
         btn_text.theme_text_color = 'Custom'
-        btn_text.text_color = (0.05, 0.06, 0.1, 1)
+        btn_text.text_color = (0.91, 0.91, 0.89, 1)
         self.unlock_btn.add_widget(btn_text)
         self.unlock_btn.bind(on_release=self.on_pin_submit)
         card.add_widget(self.unlock_btn)

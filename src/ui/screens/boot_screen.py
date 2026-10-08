@@ -46,7 +46,7 @@ class BootScreen(MDScreen):
         
         # App name
         app_name = MDLabel(
-            text="Ghost Net",
+            text="GOST-NET",
             halign='center',
             font_style='Headline',
             role='large',
@@ -54,9 +54,9 @@ class BootScreen(MDScreen):
             height=dp(60)
         )
         
-        # Tagline
+        # System description
         tagline = MDLabel(
-            text="Secure • Offline • Free",
+            text="Offline Mesh Cryptographic Radio Terminal",
             halign='center',
             theme_text_color='Secondary',
             font_style='Body',
@@ -68,10 +68,10 @@ class BootScreen(MDScreen):
         # Loading spinner
         self.spinner = MDSpinner(
             size_hint=(None, None),
-            size=(dp(40), dp(40)),
+            size=(dp(36), dp(36)),
             pos_hint={'center_x': 0.5},
             active=True,
-            color=(0.65, 0.79, 0.92, 1)
+            color=(0.24, 0.44, 0.64, 1.0)
         )
         
         # Status label

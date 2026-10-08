@@ -55,12 +55,12 @@ class DiagnosticsScreen(MDScreen):
         back_btn = MDIconButton(
             icon='arrow-left',
             theme_icon_color='Custom',
-            icon_color=(0.65, 0.79, 0.92, 1)
+            icon_color=(0.627, 0.631, 0.604, 1)
         )
         back_btn.bind(on_release=self.close_diagnostics)
         
         title = MDLabel(
-            text=f'Diagnostics (v{APP_VERSION})',
+            text=f'04 / SYSTEM TELEMETRY (v{APP_VERSION})',
             font_style='Title',
             role='large',
             theme_text_color='Primary',
@@ -74,21 +74,22 @@ class DiagnosticsScreen(MDScreen):
         buttons_layout = MDBoxLayout(
             orientation='horizontal',
             size_hint_y=None,
-            height=dp(48),
-            spacing=dp(10),
-            padding=dp(10)
+            height=dp(42),
+            spacing=dp(8),
+            padding=[dp(4), dp(2), dp(4), dp(2)]
         )
         
         export_btn = MDButton(
             style='filled',
             theme_width='Custom',
             size_hint_x=0.5,
+            radius=[dp(4), dp(4), dp(4), dp(4)],
             theme_bg_color='Custom',
-            md_bg_color=(0.65, 0.79, 0.92, 1)
+            md_bg_color=(0.24, 0.44, 0.64, 1.0)
         )
-        export_btn_text = MDButtonText(text='Export Mission Logs')
+        export_btn_text = MDButtonText(text='Export Logs')
         export_btn_text.theme_text_color = 'Custom'
-        export_btn_text.text_color = (0.05, 0.06, 0.1, 1)
+        export_btn_text.text_color = (0.910, 0.914, 0.894, 1.0)
         export_btn.add_widget(export_btn_text)
         export_btn.bind(on_release=self.export_mission_logs)
         
@@ -96,13 +97,14 @@ class DiagnosticsScreen(MDScreen):
             style='outlined',
             theme_width='Custom',
             size_hint_x=0.5,
+            radius=[dp(4), dp(4), dp(4), dp(4)],
             theme_bg_color='Custom',
-            md_bg_color=(0.1, 0.12, 0.18, 0.3),
-            line_color=(0.25, 0.32, 0.45, 0.35)
+            md_bg_color=(0.090, 0.094, 0.086, 0.8),
+            line_color=(0.188, 0.192, 0.176, 1.0)
         )
         clear_btn_text = MDButtonText(text='Clear Telemetry')
         clear_btn_text.theme_text_color = 'Custom'
-        clear_btn_text.text_color = (0.65, 0.79, 0.92, 1)
+        clear_btn_text.text_color = (0.627, 0.631, 0.604, 1.0)
         clear_btn.add_widget(clear_btn_text)
         clear_btn.bind(on_release=self.clear_telemetry)
         
@@ -114,21 +116,22 @@ class DiagnosticsScreen(MDScreen):
         toggle_layout = MDBoxLayout(
             orientation='horizontal',
             size_hint_y=None,
-            height=dp(48),
-            spacing=dp(10),
-            padding=dp(10)
+            height=dp(40),
+            spacing=dp(8),
+            padding=[dp(4), dp(2), dp(4), dp(2)]
         )
         self.toggle_btn = MDButton(
             style='outlined',
             theme_width='Custom',
             size_hint_x=1,
+            radius=[dp(4), dp(4), dp(4), dp(4)],
             theme_bg_color='Custom',
-            md_bg_color=(0.1, 0.12, 0.18, 0.3),
-            line_color=(0.25, 0.32, 0.45, 0.35)
+            md_bg_color=(0.090, 0.094, 0.086, 0.8),
+            line_color=(0.188, 0.192, 0.176, 1.0)
         )
         self.toggle_btn_text = MDButtonText(text='View Mesh Graph')
         self.toggle_btn_text.theme_text_color = 'Custom'
-        self.toggle_btn_text.text_color = (0.65, 0.79, 0.92, 1)
+        self.toggle_btn_text.text_color = (0.24, 0.44, 0.64, 1.0)
         self.toggle_btn.add_widget(self.toggle_btn_text)
         self.toggle_btn.bind(on_release=self.toggle_view)
         toggle_layout.add_widget(self.toggle_btn)
@@ -220,7 +223,7 @@ class DiagnosticsScreen(MDScreen):
                 
                 # 1. Node Status Section
                 node_section = MDBoxLayout(orientation='vertical', adaptive_height=True, spacing=dp(4))
-                node_section.add_widget(MDLabel(text='[b]NODE STATUS[/b]', markup=True, font_style='Body', role='large', theme_text_color='Hint'))
+                node_section.add_widget(MDLabel(text='[b]01 / NODE STATUS[/b]', markup=True, font_style='Body', role='large', theme_text_color='Primary'))
                 self.lbl_node_ip = MDLabel(text='', font_style='Body', role='small')
                 self.lbl_node_mac = MDLabel(text='', font_style='Body', role='small')
                 self.lbl_node_service = MDLabel(text='', font_style='Body', role='small')
@@ -233,14 +236,14 @@ class DiagnosticsScreen(MDScreen):
                 
                 # 2. Routing Table Section
                 routing_section = MDBoxLayout(orientation='vertical', adaptive_height=True, spacing=dp(3))
-                routing_section.add_widget(MDLabel(text='[b]ROUTING TABLE[/b]', markup=True, font_style='Body', role='large', theme_text_color='Hint'))
+                routing_section.add_widget(MDLabel(text='[b]02 / ROUTING TOPOLOGY[/b]', markup=True, font_style='Body', role='large', theme_text_color='Primary'))
                 self.routing_entries_box = MDBoxLayout(orientation='vertical', adaptive_height=True, spacing=dp(2))
                 routing_section.add_widget(self.routing_entries_box)
                 self.diag_box.add_widget(routing_section)
                 
                 # 3. Socket Health Section
                 socket_section = MDBoxLayout(orientation='vertical', adaptive_height=True, spacing=dp(3))
-                socket_section.add_widget(MDLabel(text='[b]SOCKET HEALTH[/b]', markup=True, font_style='Body', role='large', theme_text_color='Hint'))
+                socket_section.add_widget(MDLabel(text='[b]03 / SOCKET & TRANSPORT HEALTH[/b]', markup=True, font_style='Body', role='large', theme_text_color='Primary'))
                 self.lbl_socket_active = MDLabel(text='', font_style='Body', role='small')
                 socket_section.add_widget(self.lbl_socket_active)
                 self.socket_entries_box = MDBoxLayout(orientation='vertical', adaptive_height=True, spacing=dp(2))

@@ -45,12 +45,12 @@ class NotesScreen(MDScreen):
         back_btn = MDIconButton(
             icon='arrow-left',
             theme_icon_color='Custom',
-            icon_color=(0.65, 0.79, 0.92, 1)
+            icon_color=(0.627, 0.631, 0.604, 1)
         )
         back_btn.bind(on_release=self.go_back)
         
         title = MDLabel(
-            text='Collaborative Notepad',
+            text='03 / FIELD NOTEPAD',
             font_style='Title',
             role='large',
             theme_text_color='Primary',
@@ -60,7 +60,7 @@ class NotesScreen(MDScreen):
         sync_btn = MDIconButton(
             icon='sync',
             theme_icon_color='Custom',
-            icon_color=(0.65, 0.79, 0.92, 1)
+            icon_color=(0.24, 0.44, 0.64, 1.0)
         )
         sync_btn.bind(on_release=self.sync_notes)
         
@@ -71,7 +71,7 @@ class NotesScreen(MDScreen):
         layout.add_widget(header)
         
         self.status_label = MDLabel(
-            text='Auto-saved locally. Press sync to broadcast to mesh peers.',
+            text='Saved to local encrypted storage. Tap sync to distribute to peers.',
             font_style='Body',
             role='small',
             theme_text_color='Secondary',
@@ -80,24 +80,25 @@ class NotesScreen(MDScreen):
         )
         layout.add_widget(self.status_label)
         
-        # Text editor container
+        # Text editor container with Workshop Grid surface and restrained border
         editor_card = MDCard(
             style='outlined',
-            padding=dp(8),
+            padding=dp(10),
             size_hint=(1, 0.88),
-            md_bg_color=(0.08, 0.10, 0.14, 0.95),
-            line_color=(0.22, 0.28, 0.38, 0.6),
-            radius=[dp(6), dp(6), dp(6), dp(6)]
+            md_bg_color=(0.090, 0.094, 0.086, 0.98),
+            line_color=(0.188, 0.192, 0.176, 1.0),
+            radius=[dp(4), dp(4), dp(4), dp(4)]
         )
         
-        # Multiline text editor for editing notes - borderless inside the card
+        # Multiline text editor for editing notes - monospace technical font
         self.editor = TextInput(
             multiline=True,
             size_hint=(1, 1),
             background_color=(0, 0, 0, 0),
-            foreground_color=(0.95, 0.96, 0.98, 1),
-            cursor_color=(0.65, 0.79, 0.92, 1),
-            font_size='16sp'
+            foreground_color=(0.910, 0.914, 0.894, 1.0),
+            cursor_color=(0.24, 0.44, 0.64, 1.0),
+            font_name='RobotoMono-Regular' if os.path.exists('RobotoMono-Regular.ttf') else 'monospace',
+            font_size='15sp'
         )
         self.editor.bind(text=self.on_text_change)
         editor_card.add_widget(self.editor)

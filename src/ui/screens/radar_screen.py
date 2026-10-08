@@ -110,7 +110,7 @@ class RadarScreen(MDScreen):
         map_btn = MDIconButton(
             icon='map',
             theme_icon_color='Custom',
-            icon_color=(0.65, 0.79, 0.92, 1),
+            icon_color=(0.627, 0.631, 0.604, 1),
             size_hint_x=0.25,
             pos_hint={'center_y': 0.5}
         )
@@ -119,7 +119,7 @@ class RadarScreen(MDScreen):
         notes_btn = MDIconButton(
             icon='note-text',
             theme_icon_color='Custom',
-            icon_color=(0.65, 0.79, 0.92, 1),
+            icon_color=(0.627, 0.631, 0.604, 1),
             size_hint_x=0.25,
             pos_hint={'center_y': 0.5}
         )
@@ -128,7 +128,7 @@ class RadarScreen(MDScreen):
         diag_btn = MDIconButton(
             icon='chart-timeline-variant',
             theme_icon_color='Custom',
-            icon_color=(0.65, 0.79, 0.92, 1),
+            icon_color=(0.627, 0.631, 0.604, 1),
             size_hint_x=0.25,
             pos_hint={'center_y': 0.5}
         )
@@ -137,7 +137,7 @@ class RadarScreen(MDScreen):
         settings_btn = MDIconButton(
             icon='cog',
             theme_icon_color='Custom',
-            icon_color=(0.65, 0.79, 0.92, 1),
+            icon_color=(0.627, 0.631, 0.604, 1),
             size_hint_x=0.25,
             pos_hint={'center_y': 0.5}
         )
@@ -380,7 +380,7 @@ class RadarScreen(MDScreen):
             )
             
             with item.canvas.after:
-                Color(0.2, 0.25, 0.35, 0.2)
+                Color(0.188, 0.192, 0.176, 0.6)  # Workshop subtle gridline divider
                 item.divider_line = Line(points=[item.x, item.y, item.x + item.width, item.y], width=1)
                 
             def _update_div(inst, val):
@@ -400,7 +400,7 @@ class RadarScreen(MDScreen):
                 font_style='Body',
                 role='small',
                 theme_text_color='Custom' if key_mismatch else 'Secondary',
-                text_color=(1, 0.45, 0.45, 1) if key_mismatch else (0.65, 0.79, 0.92, 1),
+                text_color=(0.75, 0.32, 0.30, 1) if key_mismatch else (0.35, 0.62, 0.42, 1) if is_verified else (0.627, 0.631, 0.604, 1),
                 adaptive_height=True
             )
             peer_meta = MDLabel(
@@ -428,14 +428,15 @@ class RadarScreen(MDScreen):
                 style='filled',
                 size_hint_x=0.26,
                 size_hint_y=None,
-                height=dp(44),
+                height=dp(38),
+                radius=[dp(4), dp(4), dp(4), dp(4)],
                 theme_bg_color='Custom',
-                md_bg_color=(0.18, 0.24, 0.35, 0.9),
+                md_bg_color=(0.24, 0.44, 0.64, 1.0),
                 pos_hint={'center_y': 0.5}
             )
             chat_btn_text = MDButtonText(text="Chat")
             chat_btn_text.theme_text_color = 'Custom'
-            chat_btn_text.text_color = (0.65, 0.79, 0.92, 1)
+            chat_btn_text.text_color = (0.91, 0.91, 0.89, 1)
             chat_btn.add_widget(chat_btn_text)
             chat_btn.bind(on_release=lambda x, p_ip=ip, p_name=username: self.open_chat(p_ip, p_name))
             
@@ -547,7 +548,7 @@ class RadarScreen(MDScreen):
                 for child in self.active_tab_btn.children:
                     if isinstance(child, MDButtonText):
                         child.theme_text_color = 'Custom'
-                        child.text_color = (0.65, 0.79, 0.92, 1)
+                        child.text_color = (0.24, 0.44, 0.64, 1.0)
                 for child in self.saved_tab_btn.children:
                     if isinstance(child, MDButtonText):
                         child.theme_text_color = 'Secondary'
@@ -558,12 +559,12 @@ class RadarScreen(MDScreen):
                 for child in self.saved_tab_btn.children:
                     if isinstance(child, MDButtonText):
                         child.theme_text_color = 'Custom'
-                        child.text_color = (0.65, 0.79, 0.92, 1)
+                        child.text_color = (0.24, 0.44, 0.64, 1.0)
             
             # Redraw bottom underline on tab_buttons_layout canvas
             self.tab_buttons_layout.canvas.after.clear()
             with self.tab_buttons_layout.canvas.after:
-                Color(0.65, 0.79, 0.92, 1) # Ice-Blue
+                Color(0.24, 0.44, 0.64, 1.0) # Steel-Blue accent indicator line
                 active_btn = self.active_tab_btn if self.current_tab == 'active' else self.saved_tab_btn
                 Line(points=[active_btn.x, self.tab_buttons_layout.y, active_btn.x + active_btn.width, self.tab_buttons_layout.y], width=dp(2))
         except Exception as e:
@@ -617,7 +618,7 @@ class RadarScreen(MDScreen):
                 )
                 
                 with item.canvas.after:
-                    Color(0.2, 0.25, 0.35, 0.2)
+                    Color(0.188, 0.192, 0.176, 0.6)
                     item.divider_line = Line(points=[item.x, item.y, item.x + item.width, item.y], width=1)
                     
                 def _update_div(inst, val):
@@ -653,7 +654,7 @@ class RadarScreen(MDScreen):
                 )
                 chat_btn_text = MDButtonText(text="Connect")
                 chat_btn_text.theme_text_color = 'Custom'
-                chat_btn_text.text_color = (0.65, 0.79, 0.92, 1) # Ice-Blue
+                chat_btn_text.text_color = (0.24, 0.44, 0.64, 1.0) # Steel-Blue accent
                 chat_btn.add_widget(chat_btn_text)
                 chat_btn.bind(on_release=lambda x, ip=peer_id, name=device_name: self.open_chat(ip, name))
                 

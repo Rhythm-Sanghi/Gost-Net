@@ -60,12 +60,12 @@ class SettingsScreen(MDScreen):
         back_btn = MDIconButton(
             icon='arrow-left',
             theme_icon_color='Custom',
-            icon_color=(0.65, 0.79, 0.92, 1)
+            icon_color=(0.627, 0.631, 0.604, 1)
         )
         back_btn.bind(on_release=self.go_back)
         
         title = MDLabel(
-            text="Settings",
+            text="05 / SYSTEM CONFIGURATION",
             font_style='Title',
             role='large',
             theme_text_color='Primary',
@@ -88,16 +88,17 @@ class SettingsScreen(MDScreen):
             padding=dp(10)
         )
         
-        # Unified settings card
+        # Unified settings surface with Workshop Grid styling
         self.settings_card = MDCard(
             orientation='vertical',
             style='outlined',
-            padding=dp(20),
-            spacing=dp(20),
+            padding=dp(18),
+            spacing=dp(18),
             size_hint_x=1,
             adaptive_height=True,
-            md_bg_color=(0.1, 0.12, 0.18, 0.65),
-            line_color=(0.25, 0.32, 0.45, 0.35)
+            md_bg_color=(0.090, 0.094, 0.086, 0.98),
+            line_color=(0.188, 0.192, 0.176, 1.0),
+            radius=[dp(4), dp(4), dp(4), dp(4)]
         )
         settings_content.add_widget(self.settings_card)
         
@@ -131,12 +132,13 @@ class SettingsScreen(MDScreen):
             theme_width='Custom',
             size_hint_x=None,
             width=dp(180),
+            radius=[dp(4), dp(4), dp(4), dp(4)],
             theme_bg_color='Custom',
-            md_bg_color=(0.65, 0.79, 0.92, 1)
+            md_bg_color=(0.24, 0.44, 0.64, 1.0)
         )
         username_btn_text = MDButtonText(text="Update Username")
         username_btn_text.theme_text_color = 'Custom'
-        username_btn_text.text_color = (0.05, 0.06, 0.1, 1)
+        username_btn_text.text_color = (0.910, 0.914, 0.894, 1.0)
         username_btn.add_widget(username_btn_text)
         username_btn.bind(on_release=self.update_username)
         
@@ -640,7 +642,7 @@ class SettingsScreen(MDScreen):
         """Creates a custom horizontal line separator."""
         divider = Widget(size_hint_y=None, height=dp(1))
         with divider.canvas.before:
-            Color(0.2, 0.25, 0.35, 0.2)
+            Color(0.188, 0.192, 0.176, 0.8)
             divider.rect = Rectangle(pos=divider.pos, size=(divider.width, 1))
         
         def _update_rect(instance, value):

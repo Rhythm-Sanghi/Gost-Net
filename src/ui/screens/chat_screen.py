@@ -68,23 +68,23 @@ class ChatScreen(MDScreen):
         header = MDBoxLayout(
             orientation='horizontal',
             size_hint_y=None,
-            height=dp(60),
-            padding=dp(10),
-            spacing=dp(10),
-            md_bg_color=(0.1, 0.12, 0.18, 0.65)
+            height=dp(56),
+            padding=[dp(12), dp(8), dp(12), dp(8)],
+            spacing=dp(8),
+            md_bg_color=(0.090, 0.094, 0.086, 0.98)
         )
         
         back_btn = MDIconButton(
             icon='arrow-left',
             theme_icon_color='Custom',
-            icon_color=(0.65, 0.79, 0.92, 1)
+            icon_color=(0.627, 0.631, 0.604, 1)
         )
         back_btn.bind(on_release=self.go_back)
         
         self.peer_label = MDLabel(
             text="Select a peer",
-            font_style='Headline',
-            role='small',
+            font_style='Title',
+            role='medium',
             theme_text_color='Primary',
             pos_hint={'center_y': 0.5},
             shorten=True,
@@ -104,7 +104,7 @@ class ChatScreen(MDScreen):
         self.ttl_btn = MDIconButton(
             icon='clock-outline',
             theme_icon_color='Custom',
-            icon_color=(0.65, 0.79, 0.92, 1),
+            icon_color=(0.627, 0.631, 0.604, 1),
             pos_hint={'center_y': 0.5}
         )
         self.ttl_btn.bind(on_release=self.toggle_ttl)
@@ -112,7 +112,7 @@ class ChatScreen(MDScreen):
         self.verify_btn = MDIconButton(
             icon='shield-outline',
             theme_icon_color='Custom',
-            icon_color=(0.55, 0.7, 0.85, 1),
+            icon_color=(0.24, 0.44, 0.64, 1.0),
             pos_hint={'center_y': 0.5}
         )
         self.verify_btn.bind(on_release=self.show_safety_number_dialog)
@@ -204,19 +204,19 @@ class ChatScreen(MDScreen):
             style='outlined',
             adaptive_height=True,
             minimum_height=dp(50),
-            padding=[dp(12), dp(4), dp(12), dp(4)],
+            padding=[dp(10), dp(4), dp(10), dp(4)],
             spacing=dp(8),
             size_hint_y=None,
-            md_bg_color=(0.08, 0.10, 0.14, 0.95),
-            line_color=(0.22, 0.28, 0.38, 0.6),
-            radius=[dp(6), dp(6), dp(6), dp(6)]
+            md_bg_color=(0.090, 0.094, 0.086, 0.98),
+            line_color=(0.188, 0.192, 0.176, 1.0),
+            radius=[dp(4), dp(4), dp(4), dp(4)]
         )
         
         # Attachment button
         attach_btn = MDIconButton(
             icon='paperclip',
             theme_icon_color='Custom',
-            icon_color=(0.65, 0.79, 0.92, 1),
+            icon_color=(0.627, 0.631, 0.604, 1),
             size_hint_x=None,
             width=dp(40),
             pos_hint={'center_y': 0.5}
@@ -230,13 +230,13 @@ class ChatScreen(MDScreen):
             height=dp(36),
             pos_hint={'center_y': 0.5}
         )
-        self.message_input.add_widget(MDTextFieldHintText(text="Type a message..."))
+        self.message_input.add_widget(MDTextFieldHintText(text="Type message..."))
         self.message_input.bind(on_text_validate=self.send_message)
         
         self.mic_btn = MDIconButton(
             icon='microphone',
             theme_icon_color='Custom',
-            icon_color=(0.65, 0.79, 0.92, 1),
+            icon_color=(0.627, 0.631, 0.604, 1),
             size_hint_x=None,
             width=dp(40),
             pos_hint={'center_y': 0.5}
@@ -251,12 +251,13 @@ class ChatScreen(MDScreen):
             size_hint_y=None,
             height=dp(36),
             pos_hint={'center_y': 0.5},
+            radius=[dp(4), dp(4), dp(4), dp(4)],
             theme_bg_color='Custom',
-            md_bg_color=(0.65, 0.79, 0.92, 1)
+            md_bg_color=(0.24, 0.44, 0.64, 1.0)
         )
         send_text = MDButtonText(text="Send")
         send_text.theme_text_color = 'Custom'
-        send_text.text_color = (0.05, 0.06, 0.1, 1)
+        send_text.text_color = (0.910, 0.914, 0.894, 1.0)
         send_btn.add_widget(send_text)
         send_btn.bind(on_release=self.send_message)
         

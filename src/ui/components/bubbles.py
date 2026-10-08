@@ -39,14 +39,14 @@ class MessageBubble(MDCard):
         
         msg_len = len(message)
         if is_sent:
-            self.md_bg_color = (0.16, 0.24, 0.36, 0.85)
-            self.line_color = (0.28, 0.40, 0.56, 0.45)
-            self.radius = [dp(10), dp(10), dp(2), dp(10)]
+            self.md_bg_color = (0.114, 0.118, 0.106, 0.95)   # Workshop surface raised
+            self.line_color = (0.24, 0.44, 0.64, 0.6)        # Steel blue border
+            self.radius = [dp(4), dp(4), dp(1), dp(4)]       # Workshop Grid restrained radius
             self.pos_hint = {'right': 0.96}
         else:
-            self.md_bg_color = (0.10, 0.12, 0.16, 0.85)
-            self.line_color = (0.22, 0.26, 0.34, 0.45)
-            self.radius = [dp(10), dp(10), dp(10), dp(2)]
+            self.md_bg_color = (0.090, 0.094, 0.086, 0.95)   # Workshop surface
+            self.line_color = (0.188, 0.192, 0.176, 0.9)     # Subtle structural border
+            self.radius = [dp(4), dp(4), dp(4), dp(1)]
             self.pos_hint = {'x': 0.04}
 
         if msg_len < 16:
@@ -162,15 +162,15 @@ class FileBubble(MDCard):
         self.padding = dp(12)
         
         if is_sent:
-            self.md_bg_color = (0.18, 0.3, 0.5, 0.7)
-            self.line_color = (0.3, 0.45, 0.6, 0.35)
-            self.radius = [dp(16), dp(16), dp(2), dp(16)]
+            self.md_bg_color = (0.114, 0.118, 0.106, 0.95)
+            self.line_color = (0.24, 0.44, 0.64, 0.6)
+            self.radius = [dp(4), dp(4), dp(1), dp(4)]
             self.pos_hint = {'right': 0.95}
             self.size_hint_x = 0.75
         else:
-            self.md_bg_color = (0.08, 0.1, 0.14, 0.6)
-            self.line_color = (0.2, 0.25, 0.35, 0.25)
-            self.radius = [dp(16), dp(16), dp(16), dp(2)]
+            self.md_bg_color = (0.090, 0.094, 0.086, 0.95)
+            self.line_color = (0.188, 0.192, 0.176, 0.9)
+            self.radius = [dp(4), dp(4), dp(4), dp(1)]
             self.pos_hint = {'x': 0.05}
             self.size_hint_x = 0.75
         
@@ -337,15 +337,15 @@ class AudioBubble(MDCard):
         self.padding = dp(12)
         
         if is_sent:
-            self.md_bg_color = (0.18, 0.3, 0.5, 0.7)
-            self.line_color = (0.3, 0.45, 0.6, 0.35)
-            self.radius = [dp(16), dp(16), dp(2), dp(16)]
+            self.md_bg_color = (0.114, 0.118, 0.106, 0.95)
+            self.line_color = (0.24, 0.44, 0.64, 0.6)
+            self.radius = [dp(4), dp(4), dp(1), dp(4)]
             self.pos_hint = {'right': 0.95}
             self.size_hint_x = 0.75
         else:
-            self.md_bg_color = (0.08, 0.1, 0.14, 0.6)
-            self.line_color = (0.2, 0.25, 0.35, 0.25)
-            self.radius = [dp(16), dp(16), dp(16), dp(2)]
+            self.md_bg_color = (0.090, 0.094, 0.086, 0.95)
+            self.line_color = (0.188, 0.192, 0.176, 0.9)
+            self.radius = [dp(4), dp(4), dp(4), dp(1)]
             self.pos_hint = {'x': 0.05}
             self.size_hint_x = 0.75
         
