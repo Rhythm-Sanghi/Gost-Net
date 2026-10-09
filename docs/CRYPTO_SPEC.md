@@ -1,8 +1,8 @@
 # Gost-Net Cryptographic Specification for External Review
 
-**Document Purpose:** Independent Technical Cryptographic Review  
-**Application:** Gost-Net v1.0.0  
-**Library Dependency:** `cryptography >= 41.0.0` (hazmat layer)  
+**Document Purpose:** Implementation notes and questions for a future independent review
+**Application:** Gost-Net v1.0.0
+**Library Dependency:** `cryptography >= 41.0.0` (hazmat layer)
 
 ---
 
@@ -10,7 +10,7 @@
 
 ### 1.1 Digital Signatures (Ed25519)
 - **Standard:** RFC 8032 (Ed25519)
-- **Rationale:** High signature generation speed, small key sizes (32 bytes public, 64 bytes signature), immune to side-channel timing attacks on software multiplication, and absence of fragile random nonce generation during signing (deterministic EdDSA).
+- **Rationale:** High signature generation speed, small key sizes (32 bytes public, 64 bytes signature), implemented by the cryptography library; application-level side-channel resistance has not been independently assessed, and absence of fragile random nonce generation during signing (deterministic EdDSA).
 - **Usage:** Long-term node identity signing of discovery beacons, message headers, revocation tokens, and custody receipts.
 
 ### 1.2 Asymmetric Key Agreement (SECP384R1 ECDH)
@@ -74,7 +74,7 @@
 For each message sent or received:
 $$\text{Message Key } MK = \text{HMAC-SHA256}(CK, \text{b"\x01"})$$
 $$\text{Next Chain Key } CK' = \text{HMAC-SHA256}(CK, \text{b"\x02"})$$
-- The message key $MK$ is zeroized immediately after encrypting or decrypting the single message payload.
+- The implementation attempts to clear message-key material after use. Python/runtime copies may remain; this is not a complete memory-erasure guarantee.
 - Previous chain keys cannot be derived from subsequent chain keys (one-way property of HMAC).
 
 ### 3.2 Diffie-Hellman Ratchet
@@ -89,7 +89,7 @@ $$RK'', CK_s = \text{HKDF}(RK', \text{ECDH}(DH_{local}', DH_{remote}))$$
 
 - AES-256-GCM nonces are strictly 12 bytes generated via CSPRNG `os.urandom(12)`.
 - For $N$ messages encrypted under a single ephemeral message key, $N = 1$ (each message key is single-use under the ratchet).
-- Therefore, catastrophic AES-GCM nonce reuse under the same key is prevented by design.
+- This relies on correct ratchet state handling and random nonce generation; independent review should check retries, restored state and out-of-order messages.
 
 ---
 
